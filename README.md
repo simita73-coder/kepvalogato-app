@@ -1,21 +1,26 @@
-# Képválogató – Android fájlmozgatás próba
+# Képválogató (Android, v2.0)
 
-Kis Android-alkalmazás, amely azt próbálja ki, hogy a telefon engedi-e a képek beolvasását és
-áthelyezését mappák között. A GitHub Actions automatikusan felépíti belőle az APK-t.
+Telefonon futó képválogató: a képet egy gombnyomásra közvetlenül a megfelelő mappába helyezi át
+(nincs txt, nincs Windowsos szétdobás). A mappagombok a kiválasztott **célmappa almappái**.
 
-## Hogyan készül az APK
-Minden feltöltésnél (push a `main` ágra) a `.github/workflows/build-apk.yml` lefut:
-1. felépíti a weboldalt (`src/main.js` → `www/app.js`),
-2. létrehozza az Android-projektet (`npx cap add android`),
-3. hozzáadja az engedélyeket és a saját plugint (`scripts/patch_android.py`, `android-extra/`),
-4. megépíti az APK-t, és kiteszi a **Releases** oldalra `kepvalogato-proba.apk` néven.
+## Használat
+1. Első indításkor: **Engedély megadása** → kapcsold be a „Minden fájl kezelése" engedélyt.
+2. **Képek mappája**: ahonnan válogat (opcionálisan az almappákkal együtt).
+3. **Célmappa**: a gyökér, amelynek almappái a kategóriák. A mappaválasztóban új mappát is lehet létrehozni.
+4. **Indítás**. Koppints a képre → gombok; dupla koppintás = nagyítás; húzás = lapozás;
+   jobbra-vissza húzás = fájlnév; **↩ Vissza** visszamozgatja az utolsó képet (újraindítás után is).
 
-Letöltési hivatkozás (a saját felhasználónévvel és projektnévvel):
+## Az APK készítése
+Minden feltöltésnél (push a `main` ágra) a `.github/workflows/build-apk.yml` lefut, és a **Releases** oldalra kiteszi:
 `https://github.com/<felhasznalonev>/<projekt>/releases/latest/download/kepvalogato-proba.apk`
 
+Az APK állandó aláírókulccsal készül (`android-extra/debug.keystore`), ezért az új verzió
+a régire közvetlenül ráfrissíthető, a beállítások megmaradnak.
+
 ## Fájlok
-- `src/main.js` – a próba oldal logikája
-- `www/index.html` – a próba oldal
-- `android-extra/AllFilesPlugin.java` – kis fájlkezelő plugin (java.io.File, "minden fájl kezelése" engedéllyel)
+- `www/index.html`, `src/main.js` – a képválogató
+- `www/proba.html`, `src/proba.js` – fájlmozgatási diagnosztika (az appból a beállítások alján érhető el)
+- `android-extra/AllFilesPlugin.java` – fájlkezelő plugin (java.io.File, „minden fájl kezelése" engedéllyel)
 - `android-extra/MainActivity.java` – a plugin regisztrálása
-- `scripts/patch_android.py` – a generált Android-projekt kiegészítése
+- `android-extra/debug.keystore` – állandó debug aláírókulcs
+- `scripts/patch_android.py` – a generált Android-projekt kiegészítése (engedélyek, plugin, aláírás)
