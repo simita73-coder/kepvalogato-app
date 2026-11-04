@@ -3,58 +3,137 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Képválogató próba</title>
+<title>Képválogató</title>
 <style>
-  :root { --bg:#161616; --fg:#eee; --bt:#2c2c2c; --acc:#3d8bfd; --bad:#ff7b7b; --ok:#7ddf7d; }
-  * { box-sizing:border-box; }
-  html,body { margin:0; background:var(--bg); color:var(--fg); font-family:system-ui,sans-serif; }
-  body { padding:14px; padding-top:calc(14px + env(safe-area-inset-top)); }
-  h1 { font-size:20px; margin:0 0 4px; }
-  h2 { font-size:16px; margin:18px 0 6px; color:#bbb; }
-  small { color:#999; }
-  button { width:100%; margin:4px 0; padding:14px 8px; font-size:16px; color:var(--fg); background:var(--bt);
-           border:1px solid #444; border-radius:10px; }
+  :root { --bg:#161616; --fg:#eee; --bt:#2c2c2c; --acc:#3d8bfd; --ok:#7ddf7d; --bad:#ff7b7b; --bh:68px; --bfs:25px; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); font-family:system-ui,sans-serif; touch-action:manipulation; overflow:hidden; }
+  button { background:var(--bt); color:var(--fg); border:1px solid #444; border-radius:10px; padding:12px 8px; font-size:16px; }
   button:active { background:#444; }
   button.acc { background:var(--acc); border-color:var(--acc); }
-  input { width:100%; margin:4px 0; padding:12px 8px; font-size:16px; color:var(--fg); background:#222;
-          border:1px solid #444; border-radius:8px; }
-  #status { padding:10px; border:1px solid #444; border-radius:10px; background:#1f1f1f; line-height:1.4; }
-  #status.ok { border-color:var(--ok); }
-  #status.no { border-color:var(--bad); }
-  #log { margin-top:12px; padding:8px; height:42vh; overflow:auto; background:#0e0e0e; border:1px solid #333;
-         border-radius:8px; font:12px/1.4 ui-monospace,monospace; white-space:pre-wrap; word-break:break-word; }
-  #log .bad { color:var(--bad); }
-  #img { display:block; max-width:100%; max-height:240px; margin:10px auto 0; border:1px solid #333; background:#000; }
+  button:disabled { opacity:.5; }
+  small { color:#aaa; }
+  a { color:#7fb0ff; }
+
+  /* Beállító képernyő */
+  #setup { padding:14px; padding-top:calc(14px + env(safe-area-inset-top)); padding-bottom:calc(24px + env(safe-area-inset-bottom));
+           overflow:auto; height:100dvh; }
+  #setup h2 { margin:.2em 0 .6em; }
+  #setup h3 { margin:1.2em 0 .3em; }
+  .row { display:flex; gap:8px; margin:10px 0; flex-wrap:wrap; }
+  .row > * { flex:1; }
+  .box { padding:10px; border:1px solid #444; border-radius:10px; background:#1f1f1f; line-height:1.4; }
+  .box.ok { border-color:var(--ok); }
+  .box.no { border-color:var(--bad); }
+  .path { font-family:ui-monospace,monospace; font-size:15px; word-break:break-all; margin:4px 0 8px; padding:8px; background:#222; border-radius:8px; }
+  .path.empty { color:#888; font-family:inherit; }
+  label.chk { display:flex; align-items:center; gap:10px; padding:8px 0; font-size:16px; }
+  label.chk input { width:22px; height:22px; flex:none; }
+  #catList { display:grid; grid-template-columns:1fr 1fr; gap:0 12px; }
+  .slider { margin:10px 0; }
+  .slider label { display:block; margin-bottom:4px; }
+  .slider input { width:100%; }
+  #bprev { display:inline-block; margin:6px 0; height:var(--bh); line-height:calc(var(--bh) - 4px); padding:0 22px; font-size:var(--bfs);
+           font-weight:600; border-radius:14px; background:#2a2a2a; border:1px solid #666; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
+
+  /* Mappaválasztó */
+  #browse { display:none; position:fixed; inset:0; background:var(--bg); flex-direction:column; z-index:20; }
+  #brHead { padding:12px 14px 8px; padding-top:calc(12px + env(safe-area-inset-top)); border-bottom:1px solid #333; }
+  #brTitle { font-weight:600; margin-bottom:4px; }
+  #brPath { font-family:ui-monospace,monospace; font-size:14px; word-break:break-all; color:#cde; }
+  #brInfo { font-size:14px; color:#aaa; margin-top:2px; }
+  #brList { flex:1; overflow:auto; padding:8px 14px; }
+  #brList button { display:block; width:100%; text-align:left; margin:5px 0; padding:14px 12px; font-size:18px; }
+  #brFoot { padding:10px 14px; padding-bottom:calc(10px + env(safe-area-inset-bottom)); border-top:1px solid #333; display:flex; gap:8px; flex-wrap:wrap; }
+  #brFoot button { flex:1; min-width:30%; }
+
+  /* Munkafelület: a kép a teljes ablakot kitölti */
+  #work { display:none; position:fixed; inset:0; background:#000; }
+  #stage { position:absolute; inset:0; overflow:hidden; touch-action:none; user-select:none; -webkit-user-select:none; }
+  #img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; -webkit-user-drag:none; transform-origin:50% 50%; }
+
+  /* Tájékoztató a bal felső sarokban: 2 mp után eltűnik */
+  #info { position:absolute; top:max(8px, env(safe-area-inset-top)); left:8px; max-width:70vw; pointer-events:none; z-index:4;
+          background:rgba(0,0,0,.55); border-radius:12px; padding:5px 10px; font-size:14px; line-height:1.3;
+          opacity:0; transition:opacity .25s; }
+  #info.show { opacity:1; }
+  #info .fn { font-size:12px; color:#bbb; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  /* Gombpanel: a kép megérintésére jön elő. A tartó átlátszik az érintésnek, csak a gombok fogják meg. */
+  #cats { position:absolute; top:max(8px, env(safe-area-inset-top)); right:8px; bottom:max(8px, env(safe-area-inset-bottom));
+          display:none; direction:rtl; pointer-events:none;
+          grid-auto-flow:column; grid-auto-columns:max-content; gap:6px; align-content:start; z-index:5;
+          max-width:calc(100% - 16px); }
+  #cats.open { display:grid; }
+  #cats button { direction:ltr; text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+                 height:var(--bh); line-height:calc(var(--bh) - 4px); padding:0 22px; font-size:var(--bfs); font-weight:600;
+                 border-radius:14px; background:rgba(34,34,34,.93); border:1px solid #666; color:var(--fg); max-width:70vw;
+                 pointer-events:auto; }
+  #cats button.act { background:rgba(60,60,70,.95); border-color:#999; }
+  #cats button.new { background:rgba(40,60,40,.93); border-color:#6a9; }
+
+  #toast { position:fixed; left:50%; bottom:calc(24px + env(safe-area-inset-bottom)); transform:translateX(-50%); background:#000c; padding:8px 14px;
+           border-radius:20px; display:none; z-index:30; max-width:90vw; text-align:center; pointer-events:none; }
 </style>
 </head>
 <body>
-  <h1>Képválogató – fájlmozgatás próba <small>v0.1</small></h1>
-  <small>Ez a kis alkalmazás csak azt próbálja ki, hogy a telefon engedi-e a fájlok olvasását és áthelyezését.</small>
 
-  <h2>1. Engedély</h2>
-  <div id="status">Ellenőrzés…</div>
-  <button class="acc" id="perm">Engedély megnyitása (minden fájl kezelése)</button>
-  <button id="check">Állapot újraellenőrzése</button>
+<div id="setup">
+  <h2>Képválogató <span id="ver" style="font-size:.6em;font-weight:400;color:#aaa"></span></h2>
 
-  <h2>2. Önteszt (biztonságos: csak a Download/KV_proba mappát használja)</h2>
-  <button class="acc" id="selftest">▶ Önteszt futtatása</button>
-  <button id="clean">Próbafájlok törlése (Download/KV_proba)</button>
+  <div id="perm" class="box">Ellenőrzés…</div>
+  <div class="row"><button class="acc" id="permBtn" style="display:none">Engedély megadása (minden fájl kezelése)</button></div>
 
-  <h2>3. Valódi mappa beolvasása</h2>
-  <input id="dir" value="Download" autocapitalize="off" autocomplete="off" spellcheck="false">
-  <button id="list">Mappa listázása</button>
-  <button id="show">Az első kép megjelenítése</button>
+  <h3>1. Képek mappája</h3>
+  <small>Ezekből a képekből válogat. A besorolt kép innen átkerül a célmappába, ezért a lista mindig csak a még besorolatlanokat mutatja.</small>
+  <div class="path" id="srcPath"></div>
+  <div class="row"><button id="srcBtn">📁 Mappa kiválasztása</button></div>
+  <label class="chk"><input type="checkbox" id="rec"> Az almappákban lévő képeket is</label>
+  <div id="srcInfo"><small></small></div>
 
-  <h2>4. Egy valódi fájl áthelyezése</h2>
-  <small>Fájl útvonala a belső tárhelyen belül, és a cél mappa. Először egy kimásolt próbafájllal próbáld.</small>
-  <input id="file" placeholder="pl. Download/PINT_01/kep.jpg" autocapitalize="off" autocomplete="off" spellcheck="false">
-  <input id="target" value="Download/KV_proba/cel" autocapitalize="off" autocomplete="off" spellcheck="false">
-  <button id="move">Áthelyezés</button>
-  <button id="back">Visszamozgatás</button>
+  <h3>2. Célmappa</h3>
+  <small>Az ebben lévő almappák lesznek a kategóriagombok. Itt hozhatsz létre újat is a mappaválasztóban.</small>
+  <div class="path" id="dstPath"></div>
+  <div class="row"><button id="dstBtn">📁 Mappa kiválasztása</button></div>
+  <small>Melyik almappák jelenjenek meg gombként?</small>
+  <div id="catList"></div>
 
-  <img id="img" alt="">
-  <div id="log"></div>
+  <h3>Mappagombok mérete <small>(ezen az eszközön külön tárolja)</small></h3>
+  <div class="slider"><label for="bh">Magasság: <b id="bhVal"></b></label>
+    <input type="range" id="bh" min="40" max="140" step="2"></div>
+  <div class="slider"><label for="bw">Szélesség: <b id="bwVal"></b></label>
+    <input type="range" id="bw" min="0" max="500" step="10"></div>
+  <div id="bprev">Minta mappa</div>
+  <div class="row"><button id="bdef">Alaphelyzet</button></div>
 
-<script src="app.js"></script>
+  <div class="row"><button class="acc" id="start" style="padding:18px 8px;font-size:19px">▶ Indítás</button></div>
+  <p><small><a href="proba.html">Fájlmozgatás próba (diagnosztika)</a></small></p>
+</div>
+
+<div id="browse">
+  <div id="brHead">
+    <div id="brTitle"></div>
+    <div id="brPath"></div>
+    <div id="brInfo"></div>
+  </div>
+  <div id="brList"></div>
+  <div id="brFoot">
+    <button id="brUp">↑ Fel</button>
+    <button id="brNew">＋ Új mappa</button>
+    <button id="brCancel">Mégse</button>
+    <button class="acc" id="brOk" style="flex-basis:100%">✔ Ezt a mappát választom</button>
+  </div>
+</div>
+
+<div id="work">
+  <div id="stage">
+    <img id="img" alt="" draggable="false">
+    <div id="info"><div id="pos"></div><div class="fn" id="fn"></div></div>
+    <div id="cats"></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script src="main.js"></script>
 </body>
 </html>

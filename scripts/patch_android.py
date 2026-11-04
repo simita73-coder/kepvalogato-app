@@ -36,3 +36,26 @@ for name in ("AllFilesPlugin.java", "MainActivity.java"):
     src = pathlib.Path("android-extra") / name
     (pkg_dir / name).write_text(src.read_text(encoding="utf-8").replace("__PACKAGE__", app_id), encoding="utf-8")
     print("Bemásolva:", pkg_dir / name)
+
+# 3) állandó aláírókulcs: így az új verzió ráfrissíthető a régire (a beállítások megmaradnak)
+import shutil
+shutil.copyfile("android-extra/debug.keystore", root / "app/debug.keystore")
+gradle = root / "app/build.gradle"
+g = gradle.read_text(encoding="utf-8")
+if "debug.keystore" not in g:
+    g += """
+
+// Állandó debug aláírás (a patch_android.py adta hozzá)
+android {
+    signingConfigs {
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+}
+"""
+    gradle.write_text(g, encoding="utf-8")
+print("Aláírókulcs beállítva.")
