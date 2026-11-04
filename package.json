@@ -1,0 +1,18 @@
+{
+  "name": "kepvalogato-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Képválogató Android alkalmazás - fájlmozgatás próba",
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --outfile=www/app.js --target=es2019"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.6.0",
+    "@capacitor/core": "8.6.0",
+    "@capacitor/filesystem": "8.1.5"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.0",
+    "esbuild": "0.28.2"
+  }
+}

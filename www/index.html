@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="hu">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Képválogató próba</title>
+<style>
+  :root { --bg:#161616; --fg:#eee; --bt:#2c2c2c; --acc:#3d8bfd; --bad:#ff7b7b; --ok:#7ddf7d; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:var(--bg); color:var(--fg); font-family:system-ui,sans-serif; }
+  body { padding:14px; padding-top:calc(14px + env(safe-area-inset-top)); }
+  h1 { font-size:20px; margin:0 0 4px; }
+  h2 { font-size:16px; margin:18px 0 6px; color:#bbb; }
+  small { color:#999; }
+  button { width:100%; margin:4px 0; padding:14px 8px; font-size:16px; color:var(--fg); background:var(--bt);
+           border:1px solid #444; border-radius:10px; }
+  button:active { background:#444; }
+  button.acc { background:var(--acc); border-color:var(--acc); }
+  input { width:100%; margin:4px 0; padding:12px 8px; font-size:16px; color:var(--fg); background:#222;
+          border:1px solid #444; border-radius:8px; }
+  #status { padding:10px; border:1px solid #444; border-radius:10px; background:#1f1f1f; line-height:1.4; }
+  #status.ok { border-color:var(--ok); }
+  #status.no { border-color:var(--bad); }
+  #log { margin-top:12px; padding:8px; height:42vh; overflow:auto; background:#0e0e0e; border:1px solid #333;
+         border-radius:8px; font:12px/1.4 ui-monospace,monospace; white-space:pre-wrap; word-break:break-word; }
+  #log .bad { color:var(--bad); }
+  #img { display:block; max-width:100%; max-height:240px; margin:10px auto 0; border:1px solid #333; background:#000; }
+</style>
+</head>
+<body>
+  <h1>Képválogató – fájlmozgatás próba <small>v0.1</small></h1>
+  <small>Ez a kis alkalmazás csak azt próbálja ki, hogy a telefon engedi-e a fájlok olvasását és áthelyezését.</small>
+
+  <h2>1. Engedély</h2>
+  <div id="status">Ellenőrzés…</div>
+  <button class="acc" id="perm">Engedély megnyitása (minden fájl kezelése)</button>
+  <button id="check">Állapot újraellenőrzése</button>
+
+  <h2>2. Önteszt (biztonságos: csak a Download/KV_proba mappát használja)</h2>
+  <button class="acc" id="selftest">▶ Önteszt futtatása</button>
+  <button id="clean">Próbafájlok törlése (Download/KV_proba)</button>
+
+  <h2>3. Valódi mappa beolvasása</h2>
+  <input id="dir" value="Download" autocapitalize="off" autocomplete="off" spellcheck="false">
+  <button id="list">Mappa listázása</button>
+  <button id="show">Az első kép megjelenítése</button>
+
+  <h2>4. Egy valódi fájl áthelyezése</h2>
+  <small>Fájl útvonala a belső tárhelyen belül, és a cél mappa. Először egy kimásolt próbafájllal próbáld.</small>
+  <input id="file" placeholder="pl. Download/PINT_01/kep.jpg" autocapitalize="off" autocomplete="off" spellcheck="false">
+  <input id="target" value="Download/KV_proba/cel" autocapitalize="off" autocomplete="off" spellcheck="false">
+  <button id="move">Áthelyezés</button>
+  <button id="back">Visszamozgatás</button>
+
+  <img id="img" alt="">
+  <div id="log"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
