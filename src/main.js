@@ -1,10 +1,11 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import { App as CapApp } from '@capacitor/app';
 
 // Saját plugin (android-extra/AllFilesPlugin.java): java.io.File a "minden fájl kezelése" engedéllyel.
 // A __MOCK_ALLFILES__ csak az automatikus tesztekhez van.
 const AllFiles = window.__MOCK_ALLFILES__ || registerPlugin('AllFiles');
 
-const VERSION = 'v3.1';
+const VERSION = 'v3.2';
 const $ = id => document.getElementById(id);
 const IMG_EXT = /\.(jpe?g|jfif|pjpe?g|pjp|png|webp|gif|bmp|avif|heic|heif)$/i;
 const VID_EXT = /\.(mp4|m4v|webm|mov|3gp|mkv|ogv|avi)$/i;
@@ -25,7 +26,7 @@ const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == n
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 const lsDel = k => { try { localStorage.removeItem(k); } catch {} };
 
-let profiles = [];              // [{id, name, src, rec, dst, hide:[], rate, tags}]
+let profiles = [];              // [{id, name, src, rec, dst, hide:[], rate, tags, shuf}]
 let P = null;                   // az éppen futó profil
 let E = null;                   // a szerkesztett profil (munkapéldány)
 let editIsNew = false, autoName = true;
@@ -87,16 +88,36 @@ async function moveUnique(from, toDir, name) {
 }
 
 // ---------------------------------------------------------------- Android "vissza" gomb: képernyők veremben
+// Az Android Vissza gombját a @capacitor/app plugin adja át (nélküle az Android egyből bezárná a programot).
+// Sorrend: felugró ablak -> címkesáv -> gombpanel -> aktuális képernyő -> főmenü -> kilépés (rákérdez).
 const layers = [];                       // 'edit' | 'browse' | 'work'
-const topLayer = () => layers[layers.length - 1] || null;
-function openLayer(kind) { layers.push(kind); history.pushState({ k: kind }, ''); }
-function closeLayer() { history.back(); }
-window.addEventListener('popstate', () => {
+function openLayer(kind) { layers.push(kind); hideExit(); }
+function closeLayer() {
   const l = layers.pop();
   if (l === 'work') leaveWork();
   else if (l === 'browse') leaveBrowse();
   else if (l === 'edit') leaveEdit();
-});
+}
+const exitOpen = () => $('exitBox').style.display === 'flex';
+function hideExit() { $('exitBox').style.display = 'none'; }
+function handleBack() {
+  if (exitOpen()) { hideExit(); return; }
+  if ($('profPick').style.display === 'flex') { $('profPick').style.display = 'none'; return; }
+  if (layers.length) {
+    if (topLayer() === 'work') {
+      if ($('tagbar').style.display === 'block') { commitTag(); return; }
+      if ($('cats').classList.contains('open')) { closeCats(); return; }
+    }
+    closeLayer();
+    return;
+  }
+  $('exitBox').style.display = 'flex';   // főmenüben vagyunk: rákérdez a kilépésre
+}
+const topLayer = () => layers[layers.length - 1] || null;
+$('exitYes').onclick = () => { try { CapApp.exitApp(); } catch { hideExit(); } };
+$('exitNo').onclick = hideExit;
+window.__kvBack = handleBack;            // a teszteléshez
+try { CapApp.addListener('backButton', handleBack); } catch (e) { /* böngészőben nincs Vissza gomb */ }
 
 // ---------------------------------------------------------------- engedély
 async function refreshPerm() {
@@ -133,6 +154,7 @@ function normProfile(p) {
     hide: Array.isArray(p.hide) ? p.hide : [],
     rate: clamp(+p.rate || 1.2, 0.5, 2.5),
     tags: !!p.tags,
+    shuf: !!p.shuf,
   };
 }
 function loadProfiles() {
@@ -174,20 +196,27 @@ function renderHome() {
 }
 $('newProf').onclick = () => openEdit(null);
 
-// ---------------------------------------------------------------- mappagombok mérete (két szám + Alkalmaz)
+// ---------------------------------------------------------------- mappagombok mérete (két szám; Enter vagy kikattintás alkalmazza)
 function applyBtn() {
   const r = document.documentElement.style;
   r.setProperty('--bh', btn.h + 'px');
   r.setProperty('--bfs', Math.round(clamp(btn.h * 0.37, 14, 36)) + 'px');
   $('bhIn').value = btn.h; $('bwIn').value = btn.w;
-  $('bprev').style.width = btn.w ? `min(${btn.w}px, 100%)` : 'auto';
+  $('bprev').style.width = btn.w ? `min(${btn.w}px, 100%)` : 'fit-content';
 }
-$('bapply').onclick = () => {
+function applyBtnInputs() {
   const h = parseInt($('bhIn').value, 10), w = parseInt($('bwIn').value, 10);
-  btn.h = clamp(isFinite(h) ? h : 68, 40, 140);
-  btn.w = isFinite(w) && w > 0 ? clamp(w, 60, 600) : 0;
-  lsSet(K.btn, btn); applyBtn(); toast('Alkalmazva');
-};
+  const nh = isFinite(h) ? clamp(h, 40, 140) : btn.h;                 // érvénytelen bevitel: marad a régi
+  const nw = $('bwIn').value.trim() === '' ? btn.w : (isFinite(w) && w > 0 ? clamp(w, 60, 600) : 0);
+  const changed = nh !== btn.h || nw !== btn.w;
+  btn.h = nh; btn.w = nw;
+  lsSet(K.btn, btn); applyBtn();
+  if (changed) toast('Gombméret beállítva', 1200);
+}
+for (const id of ['bhIn', 'bwIn']) {
+  $(id).addEventListener('change', applyBtnInputs);                   // kikattintásra vagy Entere
+  $(id).addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } });
+}
 
 // ---------------------------------------------------------------- profil szerkesztése
 function showPath(el, p) {
@@ -203,6 +232,7 @@ function openEdit(p) {
   $('edName').placeholder = baseName(E.src) || 'a képek mappájának neve';
   $('edRate').value = String(E.rate).replace('.', ',');
   $('edTags').checked = E.tags;
+  $('edShuf').checked = E.shuf;
   $('rec').checked = E.rec;
   $('edDelete').style.display = p ? '' : 'none';
   $('home').style.display = 'none'; $('edit').style.display = 'block';
@@ -221,7 +251,7 @@ $('edCancel').onclick = closeLayer;
 $('edSave').onclick = () => {
   const r = parseRate($('edRate').value);
   if (r === null) { alert('A sebesség 0,5 és 2,5 közötti szám legyen (pl. 1,2).'); return; }
-  E.rate = r; E.tags = $('edTags').checked; E.rec = $('rec').checked;
+  E.rate = r; E.tags = $('edTags').checked; E.shuf = $('edShuf').checked; E.rec = $('rec').checked;
   E.name = ($('edName').value || '').trim() || baseName(E.src) || 'Profil';
   const i = profiles.findIndex(p => p.id === E.id);
   if (i >= 0) profiles[i] = E; else profiles.push(E);
@@ -338,6 +368,10 @@ let suppressUntil = 0;
 const relOf = it => join(it.dir, it.name);
 const saveHist = () => { if (hist.length > HIST_MAX) hist = hist.slice(-HIST_MAX); lsSet(K.hist + P.id, hist); };
 
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
 async function startProfile(p, switching = false) {
   if (!(await refreshPerm())) { toast('Előbb add meg a fájlkezelési engedélyt.', 3000); return; }
   if (!p.src) { alert('Ennél a profilnál nincs kiválasztva a képek mappája. Nyisd meg a ⚙ beállításokat.'); return; }
@@ -347,6 +381,7 @@ async function startProfile(p, switching = false) {
     const dirs = (await subDirs(p.dst)).filter(n => !p.hide.includes(n));
     if (!dirs.length) { alert('A célmappában nincs megjelenített almappa. Hozz létre legalább egyet.'); return; }
     const items = await scanMedia(p.src, p.rec, p.dst);
+    if (p.shuf) shuffle(items);                    // véletlen sorrend (profilonként kapcsolható)
     if (!items.length) { alert('Nincs besorolatlan kép vagy videó ebben a profilban: ' + profTitle(p)); return; }
     if (switching) teardownWork();                 // az előző profil munkafelülete lezárul
     P = p;

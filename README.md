@@ -1,4 +1,4 @@
-# Kép-videó válogató (Android, v3.1)
+# Kép-videó válogató (Android, v3.2)
 
 Telefonon futó kép- és videóválogató: a fájlt egy gombnyomásra közvetlenül a megfelelő mappába helyezi át
 (nincs txt, nincs Windowsos szétdobás). A mappagombok a kiválasztott **célmappa almappái**.
@@ -8,9 +8,12 @@ Minden munkához külön profil tartozik (pl. „Pinterest képek", „AI képek
 - forrásmappa (in) és célmappa (out), a profil neve alapból a forrásmappa neve (átnevezhető),
 - melyik almappák legyenek gombok, az almappákból is olvasson-e,
 - videók lejátszási sebessége (alap 1,2×),
+- véletlen sorrend (a fájlok összekeverve jönnek; indításonként újra keveri),
 - címkézés be/ki (nem kötelező).
 
-Az Android „vissza" gombja egy szinttel visszalép (munkafelület → profillista).
+Az Android „vissza" gombja egy szinttel visszalép (felugró ablak / címkesáv / gombpanel → válogatás → főmenü);
+a főmenüben rákérdez a kilépésre (Igen = kilép). Ehhez a `@capacitor/app` plugin kell.
+A mappagombok méretét a főmenüben két számmal lehet megadni: Enter vagy kikattintás után azonnal érvénybe lép.
 
 ## Használat
 1. Első indításkor: **Engedély megadása** → kapcsold be a „Minden fájl kezelése" engedélyt.
