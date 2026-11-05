@@ -14,12 +14,14 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Egyszerű fájlkezelő plugin a "minden fájl kezelése" engedéllyel.
@@ -141,6 +143,71 @@ public class AllFilesPlugin extends Plugin {
             OutputStream out = new FileOutputStream(f);
             try {
                 out.write(bytes);
+            } finally {
+                out.close();
+            }
+            call.resolve();
+        } catch (Exception e) {
+            call.reject(msg(e));
+        }
+    }
+
+    /** Szöveges fájl beolvasása (UTF-8). */
+    @PluginMethod
+    public void readText(PluginCall call) {
+        try {
+            File f = resolve(call.getString("path"));
+            if (!f.isFile()) {
+                call.reject("A fájl nem létezik: " + f.getPath());
+                return;
+            }
+            InputStream in = new FileInputStream(f);
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            try {
+                byte[] buf = new byte[65536];
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    bos.write(buf, 0, n);
+                }
+            } finally {
+                in.close();
+            }
+            JSObject r = new JSObject();
+            r.put("text", new String(bos.toByteArray(), StandardCharsets.UTF_8));
+            call.resolve(r);
+        } catch (Exception e) {
+            call.reject(msg(e));
+        }
+    }
+
+    /** Szöveg írása (UTF-8): felülírja a fájlt. */
+    @PluginMethod
+    public void writeText(PluginCall call) {
+        writeTextImpl(call, false);
+    }
+
+    /** Szöveg hozzáfűzése a fájl végéhez (UTF-8); ha a fájl nincs, létrehozza. */
+    @PluginMethod
+    public void appendText(PluginCall call) {
+        writeTextImpl(call, true);
+    }
+
+    private void writeTextImpl(PluginCall call, boolean append) {
+        try {
+            File f = resolve(call.getString("path"));
+            String text = call.getString("text");
+            if (text == null) {
+                call.reject("hiányzó szöveg");
+                return;
+            }
+            File parent = f.getParentFile();
+            if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
+                call.reject("A mappa nem hozható létre: " + parent.getPath());
+                return;
+            }
+            OutputStream out = new FileOutputStream(f, append);
+            try {
+                out.write(text.getBytes(StandardCharsets.UTF_8));
             } finally {
                 out.close();
             }

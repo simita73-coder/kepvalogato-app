@@ -50,7 +50,17 @@
   /* Munkafelület: a kép a teljes ablakot kitölti */
   #work { display:none; position:fixed; inset:0; background:#000; }
   #stage { position:absolute; inset:0; overflow:hidden; touch-action:none; user-select:none; -webkit-user-select:none; }
-  #img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; -webkit-user-drag:none; transform-origin:50% 50%; }
+  #img, #vid { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; -webkit-user-drag:none; transform-origin:50% 50%; }
+  #vid { display:none; pointer-events:none; background:#000; }
+
+  /* Videó tekerősáv (csak videónál látszik) */
+  #seek { position:absolute; left:0; right:0; bottom:max(0px, env(safe-area-inset-bottom)); height:44px; display:none; z-index:6; touch-action:none; }
+  #seek .track { position:absolute; left:12px; right:12px; bottom:14px; height:6px; border-radius:3px; background:rgba(255,255,255,.28); }
+  #seek .fill { position:absolute; left:0; top:0; bottom:0; width:0; border-radius:3px; background:var(--acc); }
+  #seek .knob { position:absolute; top:50%; width:18px; height:18px; margin:-9px 0 0 -9px; border-radius:50%; background:#fff; left:0; }
+  #seek .time { position:absolute; right:14px; bottom:24px; font-size:13px; color:#ddd; background:rgba(0,0,0,.55); border-radius:8px; padding:1px 7px; }
+  #work.video #seek { display:block; }
+  #work.video #cats { bottom:calc(max(8px, env(safe-area-inset-bottom)) + 44px); }
 
   /* Tájékoztató a bal felső sarokban: 2 mp után eltűnik */
   #info { position:absolute; top:max(8px, env(safe-area-inset-top)); left:8px; max-width:70vw; pointer-events:none; z-index:4;
@@ -84,11 +94,11 @@
   <div id="perm" class="box">Ellenőrzés…</div>
   <div class="row"><button class="acc" id="permBtn" style="display:none">Engedély megadása (minden fájl kezelése)</button></div>
 
-  <h3>1. Képek mappája</h3>
-  <small>Ezekből a képekből válogat. A besorolt kép innen átkerül a célmappába, ezért a lista mindig csak a még besorolatlanokat mutatja.</small>
+  <h3>1. Képek / videók mappája</h3>
+  <small>Ezekből a képekből és videókból válogat. A besorolt kép innen átkerül a célmappába, ezért a lista mindig csak a még besorolatlanokat mutatja.</small>
   <div class="path" id="srcPath"></div>
   <div class="row"><button id="srcBtn">📁 Mappa kiválasztása</button></div>
-  <label class="chk"><input type="checkbox" id="rec"> Az almappákban lévő képeket is</label>
+  <label class="chk"><input type="checkbox" id="rec"> Az almappákban lévő fájlokat is</label>
   <div id="srcInfo"><small></small></div>
 
   <h3>2. Célmappa</h3>
@@ -105,6 +115,10 @@
     <input type="range" id="bw" min="0" max="500" step="10"></div>
   <div id="bprev">Minta mappa</div>
   <div class="row"><button id="bdef">Alaphelyzet</button></div>
+
+  <h3>Videók lejátszási sebessége</h3>
+  <div class="slider"><label for="rate">Sebesség: <b id="rateVal"></b></label>
+    <input type="range" id="rate" min="0.5" max="2.5" step="0.1"></div>
 
   <div class="row"><button class="acc" id="start" style="padding:18px 8px;font-size:19px">▶ Indítás</button></div>
   <p><small><a href="proba.html">Fájlmozgatás próba (diagnosztika)</a></small></p>
@@ -128,8 +142,10 @@
 <div id="work">
   <div id="stage">
     <img id="img" alt="" draggable="false">
+    <video id="vid" playsinline loop></video>
     <div id="info"><div id="pos"></div><div class="fn" id="fn"></div></div>
     <div id="cats"></div>
+    <div id="seek"><div class="time" id="seekTime"></div><div class="track"><div class="fill" id="seekFill"></div><div class="knob" id="seekKnob"></div></div></div>
   </div>
 </div>
 <div id="toast"></div>

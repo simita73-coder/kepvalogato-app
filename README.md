@@ -1,6 +1,6 @@
-# Képválogató (Android, v2.0)
+# Képválogató (Android, v2.1)
 
-Telefonon futó képválogató: a képet egy gombnyomásra közvetlenül a megfelelő mappába helyezi át
+Telefonon futó kép- és videóválogató: a fájlt egy gombnyomásra közvetlenül a megfelelő mappába helyezi át
 (nincs txt, nincs Windowsos szétdobás). A mappagombok a kiválasztott **célmappa almappái**.
 
 ## Használat
@@ -8,7 +8,8 @@ Telefonon futó képválogató: a képet egy gombnyomásra közvetlenül a megfe
 2. **Képek mappája**: ahonnan válogat (opcionálisan az almappákkal együtt).
 3. **Célmappa**: a gyökér, amelynek almappái a kategóriák. A mappaválasztóban új mappát is lehet létrehozni.
 4. **Indítás**. Koppints a képre → gombok; dupla koppintás = nagyítás; húzás = lapozás;
-   jobbra-vissza húzás = fájlnév; **↩ Vissza** visszamozgatja az utolsó képet (újraindítás után is).
+   jobbra-vissza húzás = fájlnév; videónál: lejátszás a beállított sebességgel (alap 1,2×), dupla koppintás = szünet/lejátszás,
+   alul tekerősáv, a gombpanelen sebességváltó; **↩ Vissza** visszamozgatja az utolsó képet (újraindítás után is).
 
 ## Az APK készítése
 Minden feltöltésnél (push a `main` ágra) a `.github/workflows/build-apk.yml` lefut, és a **Releases** oldalra kiteszi:

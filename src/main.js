@@ -4,9 +4,12 @@ import { Capacitor, registerPlugin } from '@capacitor/core';
 // A __MOCK_ALLFILES__ csak az automatikus tesztekhez van.
 const AllFiles = window.__MOCK_ALLFILES__ || registerPlugin('AllFiles');
 
-const VERSION = 'v2.0';
+const VERSION = 'v2.1';
 const $ = id => document.getElementById(id);
 const IMG_EXT = /\.(jpe?g|jfif|pjpe?g|pjp|png|webp|gif|bmp|avif|heic|heif)$/i;
+const VID_EXT = /\.(mp4|m4v|webm|mov|3gp|mkv|ogv|avi)$/i;
+const isVideo = name => VID_EXT.test(name);
+const isMedia = name => IMG_EXT.test(name) || VID_EXT.test(name);
 const ZOOM = 2.5;
 const HIST_MAX = 100;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -16,12 +19,13 @@ $('ver').textContent = VERSION;
 document.title = 'Képválogató ' + VERSION;
 
 // ---------------------------------------------------------------- tárolás (csak ezen az eszközön)
-const K = { src: 'kv2_src', dst: 'kv2_dst', rec: 'kv2_rec', hide: 'kv2_hide', btn: 'kv_btn', hist: 'kv2_hist' };
+const K = { src: 'kv2_src', dst: 'kv2_dst', rec: 'kv2_rec', hide: 'kv2_hide', btn: 'kv_btn', hist: 'kv2_hist', rate: 'kv2_rate' };
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
 let cfg = { src: '', dst: '', rec: false, hide: [] };   // hide: a nem gombként használt almappák nevei
 let btn = { h: 68, w: 0 };
+let rate = 1.2;                 // videók lejátszási sebessége
 let ROOT = '/storage/emulated/0';
 let granted = false;
 
@@ -54,7 +58,7 @@ async function scanImages(src, rec, skipDir) {
     for (const f of items) {
       if (f.name.startsWith('.')) continue;
       if (f.dir) { if (rec) stack.push(join(d, f.name)); }
-      else if (IMG_EXT.test(f.name)) out.push({ dir: d, name: f.name });
+      else if (isMedia(f.name)) out.push({ dir: d, name: f.name });
     }
   }
   out.sort((a, b) => a.dir === b.dir ? coll.compare(a.name, b.name) : coll.compare(a.dir, b.dir));
@@ -132,7 +136,7 @@ async function refreshSetup() {
     try {
       const imgs = await scanImages(cfg.src, cfg.rec, cfg.dst);
       if (my !== setupToken) return;
-      info.textContent = imgs.length ? `${imgs.length} besorolatlan kép van ebben a mappában.` : 'Nincs kép ebben a mappában.';
+      info.textContent = imgs.length ? `${imgs.length} besorolatlan kép/videó van ebben a mappában.` : 'Nincs kép vagy videó ebben a mappában.';
     } catch (e) { if (my === setupToken) info.textContent = '⚠ A mappa nem olvasható: ' + errText(e); }
   } else info.textContent = '';
 
@@ -172,6 +176,8 @@ function saveBtn() { lsSet(K.btn, btn); }
 $('bh').oninput = () => { btn.h = +$('bh').value; saveBtn(); applyBtn(); };
 $('bw').oninput = () => { btn.w = +$('bw').value; saveBtn(); applyBtn(); };
 $('bdef').onclick = () => { btn = { h: 68, w: 0 }; saveBtn(); applyBtn(); };
+function applyRate() { $('rate').value = rate; $('rateVal').textContent = rate.toFixed(1) + '×'; }
+$('rate').oninput = () => { rate = +$('rate').value; lsSet(K.rate, rate); applyRate(); };
 
 // ---------------------------------------------------------------- mappaválasztó
 const br = { kind: 'src', path: '' };
@@ -197,8 +203,9 @@ async function brRender() {
   }
   const dirs = items.filter(f => f.dir && !f.name.startsWith('.')).map(f => f.name).sort(coll.compare);
   const imgs = items.filter(f => !f.dir && IMG_EXT.test(f.name)).length;
+  const vids = items.filter(f => !f.dir && VID_EXT.test(f.name)).length;
   $('brPath').textContent = '/' + br.path;
-  $('brInfo').textContent = `${dirs.length} almappa, ${imgs} kép`;
+  $('brInfo').textContent = `${dirs.length} almappa, ${imgs} kép, ${vids} videó`;
   $('brUp').disabled = !br.path;
   const list = $('brList');
   list.innerHTML = '';
@@ -246,7 +253,7 @@ $('start').onclick = async () => {
     const dirs = (await subDirs(cfg.dst)).filter(n => !cfg.hide.includes(n));
     if (!dirs.length) { alert('A célmappában nincs megjelenített almappa. Hozz létre legalább egyet.'); return; }
     const items = await scanImages(cfg.src, cfg.rec, cfg.dst);
-    if (!items.length) { alert('Nincs besorolatlan kép a kiválasztott mappában.'); return; }
+    if (!items.length) { alert('Nincs besorolatlan kép vagy videó a kiválasztott mappában.'); return; }
     cats = dirs; queue = items; qi = 0; sortedCount = 0;
     rank = new Map(items.map((it, i) => [it, i]));
     buildPanel();
@@ -261,7 +268,7 @@ $('start').onclick = async () => {
 function leaveWork() {
   cancelTap(); closeCats(); resetZoom();
   clearTimeout(infoTimer); $('info').classList.remove('show');
-  preloaded.length = 0; $('img').removeAttribute('src');
+  preloaded.length = 0; $('img').removeAttribute('src'); unloadVideo();
   $('work').style.display = 'none'; $('setup').style.display = 'block';
   refreshSetup();
 }
@@ -275,9 +282,12 @@ function buildPanel() {
     b.textContent = label; if (cls) b.className = cls;
     b.onclick = ev => { ev.stopPropagation(); if (Date.now() < suppressUntil) return; fn(); };
     box.appendChild(b);
+    return b;
   };
   mk('↩ Vissza', 'act', undo);
   mk('☰ Menü', 'act', () => closeLayer());
+  speedBtn = mk('', 'act', cycleSpeed);
+  updateSpeedBtn();
   cats.forEach(c => mk(c, '', () => choose(c)));
   mk('＋ Új mappa', 'new', newCategory);
 }
@@ -343,7 +353,9 @@ function cancelTap() { clearTimeout(tapTimer); lastTap = null; }
 function tap(x, y) {
   const now = Date.now();
   if (lastTap && now - lastTap.t < 300 && Math.hypot(x - lastTap.x, y - lastTap.y) < 40) {
-    cancelTap(); toggleZoom(x, y); return;
+    cancelTap();
+    if (curIsVideo()) togglePlay(); else toggleZoom(x, y);
+    return;
   }
   lastTap = { t: now, x, y };
   tapTimer = setTimeout(() => {          // egyszeri koppintás: gombpanel ki/be
@@ -388,17 +400,92 @@ function updateInfo() {
   $('pos').textContent = `${qi + 1}/${queue.length}` + (sortedCount ? ` · ${sortedCount} besorolva` : '');
   $('fn').textContent = relOf(it);
 }
+// ---- videó ----
+let speedBtn = null;
+const SPEEDS = [1, 1.2, 1.5, 2];
+const curIsVideo = () => { const it = queue[qi]; return !!it && isVideo(it.name); };
+function unloadVideo() {
+  const v = $('vid');
+  try { v.pause(); } catch {}
+  v.removeAttribute('src'); v.load();
+  v.style.display = 'none';
+  $('work').classList.remove('video');
+}
+function togglePlay() {
+  const v = $('vid');
+  if (v.paused) { const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); toast('▶', 500); }
+  else { v.pause(); toast('⏸', 500); }
+}
+function updateSpeedBtn() {
+  if (!speedBtn) return;
+  speedBtn.textContent = '⏩ ' + rate.toFixed(1) + '×';
+  speedBtn.style.display = curIsVideo() ? '' : 'none';
+}
+function cycleSpeed() {
+  const i = SPEEDS.findIndex(s => Math.abs(s - rate) < 0.05);
+  rate = SPEEDS[(i + 1) % SPEEDS.length];
+  lsSet(K.rate, rate); applyRate();
+  $('vid').playbackRate = rate;
+  updateSpeedBtn();
+}
+const fmtTime = s => { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+function updateSeek() {
+  const v = $('vid'), d = v.duration;
+  const f = d > 0 && isFinite(d) ? clamp(v.currentTime / d, 0, 1) : 0;
+  $('seekFill').style.width = (f * 100) + '%';
+  $('seekKnob').style.left = (f * 100) + '%';
+  $('seekTime').textContent = fmtTime(v.currentTime) + ' / ' + fmtTime(d);
+}
+{
+  const v = $('vid');
+  v.addEventListener('timeupdate', updateSeek);
+  v.addEventListener('durationchange', updateSeek);
+  v.addEventListener('loadedmetadata', () => { v.playbackRate = rate; updateSeek(); });
+  const seekEl = $('seek');
+  let seeking = false;
+  const seekTo = e => {
+    const r = seekEl.querySelector('.track').getBoundingClientRect();
+    const f = clamp((e.clientX - r.left) / r.width, 0, 1);
+    if (v.duration > 0 && isFinite(v.duration)) { v.currentTime = f * v.duration; updateSeek(); }
+  };
+  seekEl.addEventListener('pointerdown', e => { e.stopPropagation(); seeking = true; try { seekEl.setPointerCapture(e.pointerId); } catch {} seekTo(e); });
+  seekEl.addEventListener('pointermove', e => { if (seeking) seekTo(e); });
+  seekEl.addEventListener('pointerup', () => { seeking = false; });
+  seekEl.addEventListener('pointercancel', () => { seeking = false; });
+}
+document.addEventListener('visibilitychange', () => {
+  const v = $('vid');
+  if (document.hidden) { try { v.pause(); } catch {} }
+  else if (layer === 'work' && curIsVideo()) { const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); }
+});
+
 function show() {
   resetZoom();
   const it = queue[qi];
-  const img = $('img');
+  const img = $('img'), vid = $('vid');
   updateInfo();
-  if (!it) { img.removeAttribute('src'); showInfo(6000); return; }
+  unloadVideo();
+  updateSpeedBtn();
+  if (!it) { img.style.display = ''; img.removeAttribute('src'); showInfo(6000); return; }
   showInfo(2000);
+  preloaded.length = 0;
+  if (isVideo(it.name)) {
+    img.removeAttribute('src'); img.style.display = 'none';
+    $('work').classList.add('video');
+    vid.style.display = 'block';
+    vid.onerror = () => toast('Nem játszható le: ' + it.name, 3000);
+    vid.defaultPlaybackRate = rate;
+    vid.src = srcFor(relOf(it));
+    vid.playbackRate = rate;
+    updateSeek();
+    const pr = vid.play(); if (pr && pr.catch) pr.catch(() => {});
+    return;
+  }
+  img.style.display = '';
   img.onerror = () => toast('Nem jeleníthető meg: ' + it.name, 2500);
   img.src = srcFor(relOf(it));
-  preloaded.length = 0;
-  for (const n of [queue[qi + 1], queue[qi - 1]]) if (n) { const im = new Image(); im.src = srcFor(relOf(n)); preloaded.push(im); }
+  // a szomszédos képeket előre betölti, hogy a lapozás gyors legyen
+  for (const n of [queue[qi + 1], queue[qi - 1]]) if (n && !isVideo(n.name)) { const im = new Image(); im.src = srcFor(relOf(n)); preloaded.push(im); }
 }
 function go(delta) {
   cancelTap();
@@ -420,6 +507,7 @@ async function choose(cat) {
   busy = true;
   try {
     const from = relOf(it);
+    if (isVideo(it.name)) unloadVideo();       // a lejátszó engedje el a fájlt
     const to = await moveUnique(from, join(cfg.dst, cat), it.name);
     history_.push({ dir: it.dir, name: it.name, from, to }); saveHist();
     queue.splice(qi, 1); sortedCount++;
@@ -428,7 +516,7 @@ async function choose(cat) {
     if (!queue.length) { qi = 0; show(); toast('Minden kép besorolva 🎉', 3000); return; }
     toast(`→ ${cat}`);
     show();
-  } catch (e) { toast('Nem sikerült áthelyezni: ' + errText(e), 4000); }
+  } catch (e) { toast('Nem sikerült áthelyezni: ' + errText(e), 4000); if (curIsVideo()) show(); }
   finally { busy = false; }
 }
 
@@ -474,6 +562,7 @@ async function init() {
   const o = lsGet(K.btn, null);
   if (o) { btn.h = clamp(+o.h || 68, 40, 140); btn.w = clamp(+o.w || 0, 0, 500); }
   applyBtn();
+  rate = clamp(+lsGet(K.rate, 1.2) || 1.2, 0.5, 2.5); applyRate();
   showPath($('srcPath'), cfg.src); showPath($('dstPath'), cfg.dst);
   $('rec').checked = cfg.rec;
   if (await refreshPerm()) refreshSetup();
