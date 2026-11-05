@@ -4,7 +4,7 @@ import { Capacitor, registerPlugin } from '@capacitor/core';
 // A __MOCK_ALLFILES__ csak az automatikus tesztekhez van.
 const AllFiles = window.__MOCK_ALLFILES__ || registerPlugin('AllFiles');
 
-const VERSION = 'v2.1';
+const VERSION = 'v3.0';
 const $ = id => document.getElementById(id);
 const IMG_EXT = /\.(jpe?g|jfif|pjpe?g|pjp|png|webp|gif|bmp|avif|heic|heif)$/i;
 const VID_EXT = /\.(mp4|m4v|webm|mov|3gp|mkv|ogv|avi)$/i;
@@ -12,20 +12,24 @@ const isVideo = name => VID_EXT.test(name);
 const isMedia = name => IMG_EXT.test(name) || VID_EXT.test(name);
 const ZOOM = 2.5;
 const HIST_MAX = 100;
+const TAG_FILE = 'cimkek.txt';
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const coll = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 $('ver').textContent = VERSION;
-document.title = 'Képválogató ' + VERSION;
+document.title = 'Kép-videó válogató ' + VERSION;
 
 // ---------------------------------------------------------------- tárolás (csak ezen az eszközön)
-const K = { src: 'kv2_src', dst: 'kv2_dst', rec: 'kv2_rec', hide: 'kv2_hide', btn: 'kv_btn', hist: 'kv2_hist', rate: 'kv2_rate' };
+const K = { profiles: 'kv3_profiles', btn: 'kv_btn', hist: 'kv3_hist_', tags: 'kv3_tagfreq' };
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+const lsDel = k => { try { localStorage.removeItem(k); } catch {} };
 
-let cfg = { src: '', dst: '', rec: false, hide: [] };   // hide: a nem gombként használt almappák nevei
-let btn = { h: 68, w: 0 };
-let rate = 1.2;                 // videók lejátszási sebessége
+let profiles = [];              // [{id, name, src, rec, dst, hide:[], rate, tags}]
+let P = null;                   // az éppen futó profil
+let E = null;                   // a szerkesztett profil (munkapéldány)
+let editIsNew = false, autoName = true;
+let btn = { h: 68, w: 0 };      // mappagombok mérete (w=0: automatikus szélesség)
 let ROOT = '/storage/emulated/0';
 let granted = false;
 
@@ -37,7 +41,8 @@ const baseName = p => p.slice(p.lastIndexOf('/') + 1);
 const dirName = p => p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
 const enc = p => p.split('/').map(encodeURIComponent).join('/');
 const srcFor = rel => Capacitor.convertFileSrc('file://' + ROOT + '/' + enc(rel));
-const isEmptyPath = p => p === '' || p == null;
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const parseRate = s => { const v = parseFloat(String(s).replace(',', '.')); return isFinite(v) ? clamp(v, 0.5, 2.5) : null; };
 
 function toast(t, ms = 1500) {
   const el = $('toast'); el.textContent = t; el.style.display = 'block';
@@ -46,8 +51,8 @@ function toast(t, ms = 1500) {
 
 async function ls(path) { return (await AllFiles.list({ path })).files || []; }
 
-/** A kép (és a mappanevek) listázása; rec=true esetén az almappákkal együtt. */
-async function scanImages(src, rec, skipDir) {
+/** A képek és videók listázása; rec=true esetén az almappákkal együtt. */
+async function scanMedia(src, rec, skipDir) {
   const out = [];
   const stack = [src];
   while (stack.length) {
@@ -81,14 +86,16 @@ async function moveUnique(from, toDir, name) {
   throw new Error('Nem találtam szabad fájlnevet: ' + name);
 }
 
-// ---------------------------------------------------------------- Android "vissza" gomb kezelése
-let layer = null;                       // 'work' | 'browse' | null
-function openLayer(kind) { layer = kind; history.pushState({ k: kind }, ''); }
+// ---------------------------------------------------------------- Android "vissza" gomb: képernyők veremben
+const layers = [];                       // 'edit' | 'browse' | 'work'
+const topLayer = () => layers[layers.length - 1] || null;
+function openLayer(kind) { layers.push(kind); history.pushState({ k: kind }, ''); }
 function closeLayer() { history.back(); }
 window.addEventListener('popstate', () => {
-  const l = layer; layer = null;
+  const l = layers.pop();
   if (l === 'work') leaveWork();
   else if (l === 'browse') leaveBrowse();
+  else if (l === 'edit') leaveEdit();
 });
 
 // ---------------------------------------------------------------- engedély
@@ -112,72 +119,156 @@ $('permBtn').onclick = async () => {
   catch (e) { toast('A beállítások nem nyithatók meg: ' + errText(e), 4000); }
 };
 document.addEventListener('visibilitychange', async () => {
-  if (document.hidden || layer) return;
-  if (await refreshPerm()) refreshSetup();
+  if (document.hidden || layers.length) return;
+  await refreshPerm();
 });
 
-// ---------------------------------------------------------------- beállító képernyő
-function saveCfg() { lsSet(K.src, cfg.src); lsSet(K.dst, cfg.dst); lsSet(K.rec, cfg.rec); lsSet(K.hide, cfg.hide); }
+// ---------------------------------------------------------------- profilok
+function normProfile(p) {
+  return {
+    id: p.id || newId(),
+    name: String(p.name || ''),
+    src: cleanPath(p.src), dst: cleanPath(p.dst),
+    rec: !!p.rec,
+    hide: Array.isArray(p.hide) ? p.hide : [],
+    rate: clamp(+p.rate || 1.2, 0.5, 2.5),
+    tags: !!p.tags,
+  };
+}
+function loadProfiles() {
+  let list = lsGet(K.profiles, null);
+  if (!Array.isArray(list)) {
+    // átvétel a régi (v2.x) egyetlen beállításból
+    list = [];
+    const src = cleanPath(lsGet('kv2_src', '')), dst = cleanPath(lsGet('kv2_dst', ''));
+    if (src || dst) {
+      const id = newId();
+      list.push({ id, name: baseName(src) || 'Alap', src, dst, rec: !!lsGet('kv2_rec', false), hide: lsGet('kv2_hide', []), rate: lsGet('kv2_rate', 1.2), tags: false });
+      const h = lsGet('kv2_hist', null); if (h) lsSet(K.hist + id, h);
+    }
+    lsSet(K.profiles, list);
+  }
+  profiles = list.map(normProfile);
+}
+const saveProfiles = () => lsSet(K.profiles, profiles);
+const profTitle = p => p.name || baseName(p.src) || 'Névtelen profil';
+
+function renderHome() {
+  const box = $('profList');
+  box.innerHTML = '';
+  if (!profiles.length) {
+    const s = document.createElement('small'); s.textContent = 'Még nincs profil. Hozz létre egyet az alábbi gombbal.'; box.appendChild(s); return;
+  }
+  for (const p of profiles) {
+    const card = document.createElement('div'); card.className = 'card';
+    const nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = profTitle(p);
+    const pp = document.createElement('div'); pp.className = 'pp';
+    pp.textContent = (p.src ? '/' + p.src : '(nincs forrás)') + '  →  ' + (p.dst ? '/' + p.dst : '(nincs cél)');
+    const row = document.createElement('div'); row.className = 'row';
+    const go_ = document.createElement('button'); go_.className = 'acc'; go_.textContent = '▶ Indítás'; go_.onclick = () => startProfile(p);
+    const ed = document.createElement('button'); ed.textContent = '⚙'; ed.setAttribute('aria-label', 'Beállítások'); ed.onclick = () => openEdit(p);
+    row.append(go_, ed);
+    card.append(nm, pp, row);
+    box.appendChild(card);
+  }
+}
+$('newProf').onclick = () => openEdit(null);
+
+// ---------------------------------------------------------------- mappagombok mérete (két szám + Alkalmaz)
+function applyBtn() {
+  const r = document.documentElement.style;
+  r.setProperty('--bh', btn.h + 'px');
+  r.setProperty('--bfs', Math.round(clamp(btn.h * 0.37, 14, 36)) + 'px');
+  $('bhIn').value = btn.h; $('bwIn').value = btn.w;
+  $('bprev').style.width = btn.w ? `min(${btn.w}px, 100%)` : 'auto';
+}
+$('bapply').onclick = () => {
+  const h = parseInt($('bhIn').value, 10), w = parseInt($('bwIn').value, 10);
+  btn.h = clamp(isFinite(h) ? h : 68, 40, 140);
+  btn.w = isFinite(w) && w > 0 ? clamp(w, 60, 600) : 0;
+  lsSet(K.btn, btn); applyBtn(); toast('Alkalmazva');
+};
+$('bdef').onclick = () => { btn = { h: 68, w: 0 }; lsSet(K.btn, btn); applyBtn(); };
+
+// ---------------------------------------------------------------- profil szerkesztése
 function showPath(el, p) {
   el.textContent = p ? '/' + p : '(még nincs kiválasztva)';
   el.className = 'path' + (p ? '' : ' empty');
 }
+function openEdit(p) {
+  editIsNew = !p;
+  E = p ? normProfile(JSON.parse(JSON.stringify(p))) : normProfile({ rate: 1.2 });
+  autoName = !p || !E.name || E.name === baseName(E.src);
+  $('edTitle').textContent = p ? 'Profil beállítása' : 'Új profil';
+  $('edName').value = E.name;
+  $('edName').placeholder = baseName(E.src) || 'a képek mappájának neve';
+  $('edRate').value = String(E.rate).replace('.', ',');
+  $('edTags').checked = E.tags;
+  $('rec').checked = E.rec;
+  $('edDelete').style.display = p ? '' : 'none';
+  $('home').style.display = 'none'; $('edit').style.display = 'block';
+  $('edit').scrollTop = 0;
+  openLayer('edit');
+  refreshEdit();
+}
+function leaveEdit() {
+  $('edit').style.display = 'none'; $('home').style.display = 'block';
+  renderHome();
+}
+$('edName').oninput = () => { E.name = $('edName').value; autoName = false; };
+$('rec').onchange = () => { E.rec = $('rec').checked; refreshEdit(); };
+$('edTags').onchange = () => { E.tags = $('edTags').checked; };
+$('edCancel').onclick = closeLayer;
+$('edSave').onclick = () => {
+  const r = parseRate($('edRate').value);
+  if (r === null) { alert('A sebesség 0,5 és 2,5 közötti szám legyen (pl. 1,2).'); return; }
+  E.rate = r; E.tags = $('edTags').checked; E.rec = $('rec').checked;
+  E.name = ($('edName').value || '').trim() || baseName(E.src) || 'Profil';
+  const i = profiles.findIndex(p => p.id === E.id);
+  if (i >= 0) profiles[i] = E; else profiles.push(E);
+  saveProfiles();
+  closeLayer();
+};
+$('edDelete').onclick = () => {
+  if (!confirm(`Törlöd a(z) „${profTitle(E)}" profilt? A fájlokhoz nem nyúl.`)) return;
+  profiles = profiles.filter(p => p.id !== E.id);
+  saveProfiles(); lsDel(K.hist + E.id);
+  closeLayer();
+};
 
-let setupToken = 0;
-async function refreshSetup() {
-  const my = ++setupToken;
-  showPath($('srcPath'), cfg.src); showPath($('dstPath'), cfg.dst);
-  $('rec').checked = cfg.rec;
+let editToken = 0;
+async function refreshEdit() {
+  const my = ++editToken;
+  showPath($('srcPath'), E.src); showPath($('dstPath'), E.dst);
   const info = $('srcInfo').firstChild;
   if (!granted) { info.textContent = ''; $('catList').innerHTML = ''; return; }
 
-  if (cfg.src) {
-    info.textContent = 'Képek számolása…';
+  if (E.src) {
+    info.textContent = 'Fájlok számolása…';
     try {
-      const imgs = await scanImages(cfg.src, cfg.rec, cfg.dst);
-      if (my !== setupToken) return;
-      info.textContent = imgs.length ? `${imgs.length} besorolatlan kép/videó van ebben a mappában.` : 'Nincs kép vagy videó ebben a mappában.';
-    } catch (e) { if (my === setupToken) info.textContent = '⚠ A mappa nem olvasható: ' + errText(e); }
+      const items = await scanMedia(E.src, E.rec, E.dst);
+      if (my !== editToken) return;
+      const v = items.filter(i => isVideo(i.name)).length;
+      info.textContent = items.length ? `${items.length} besorolatlan fájl (${items.length - v} kép, ${v} videó) van ebben a mappában.` : 'Nincs kép vagy videó ebben a mappában.';
+    } catch (e) { if (my === editToken) info.textContent = '⚠ A mappa nem olvasható: ' + errText(e); }
   } else info.textContent = '';
 
   const list = $('catList');
   list.innerHTML = '';
-  if (!cfg.dst) return;
+  if (!E.dst) return;
   try {
-    const dirs = await subDirs(cfg.dst);
-    if (my !== setupToken) return;
+    const dirs = await subDirs(E.dst);
+    if (my !== editToken) return;
     if (!dirs.length) { list.innerHTML = '<small>Ebben a mappában még nincs almappa. Hozz létre egyet a mappaválasztóban („＋ Új mappa").</small>'; return; }
     for (const n of dirs) {
       const l = document.createElement('label'); l.className = 'chk';
-      const c = document.createElement('input'); c.type = 'checkbox'; c.checked = !cfg.hide.includes(n);
-      c.onchange = () => {
-        cfg.hide = cfg.hide.filter(x => x !== n);
-        if (!c.checked) cfg.hide.push(n);
-        saveCfg();
-      };
+      const c = document.createElement('input'); c.type = 'checkbox'; c.checked = !E.hide.includes(n);
+      c.onchange = () => { E.hide = E.hide.filter(x => x !== n); if (!c.checked) E.hide.push(n); };
       l.append(c, document.createTextNode(n));
       list.appendChild(l);
     }
   } catch (e) { list.innerHTML = '<small>⚠ A célmappa nem olvasható: ' + errText(e) + '</small>'; }
 }
-$('rec').onchange = () => { cfg.rec = $('rec').checked; saveCfg(); refreshSetup(); };
-
-// ---- mappagombok mérete ----
-function applyBtn() {
-  const r = document.documentElement.style;
-  r.setProperty('--bh', btn.h + 'px');
-  r.setProperty('--bfs', Math.round(clamp(btn.h * 0.37, 14, 36)) + 'px');
-  $('bh').value = btn.h; $('bw').value = btn.w;
-  $('bhVal').textContent = btn.h + ' px';
-  $('bwVal').textContent = btn.w ? btn.w + ' px' : 'automatikus (a név hossza szerint)';
-  $('bprev').style.width = btn.w ? `min(${btn.w}px, 100%)` : 'auto';
-}
-function saveBtn() { lsSet(K.btn, btn); }
-$('bh').oninput = () => { btn.h = +$('bh').value; saveBtn(); applyBtn(); };
-$('bw').oninput = () => { btn.w = +$('bw').value; saveBtn(); applyBtn(); };
-$('bdef').onclick = () => { btn = { h: 68, w: 0 }; saveBtn(); applyBtn(); };
-function applyRate() { $('rate').value = rate; $('rateVal').textContent = rate.toFixed(1) + '×'; }
-$('rate').oninput = () => { rate = +$('rate').value; lsSet(K.rate, rate); applyRate(); };
 
 // ---------------------------------------------------------------- mappaválasztó
 const br = { kind: 'src', path: '' };
@@ -185,15 +276,15 @@ $('srcBtn').onclick = () => openBrowse('src');
 $('dstBtn').onclick = () => openBrowse('dst');
 
 async function openBrowse(kind) {
-  if (!(await refreshPerm())) { toast('Előbb add meg a fájlkezelési engedélyt.', 3000); return; }
+  if (!(await refreshPerm())) { toast('Előbb add meg a fájlkezelési engedélyt (a főképernyőn).', 3500); return; }
   br.kind = kind;
-  br.path = cleanPath(kind === 'src' ? cfg.src : cfg.dst);
-  $('brTitle').textContent = kind === 'src' ? 'Válaszd ki a képek mappáját' : 'Válaszd ki a célmappát (az almappái a kategóriák)';
+  br.path = cleanPath(kind === 'src' ? E.src : E.dst);
+  $('brTitle').textContent = kind === 'src' ? 'Válaszd ki a képek / videók mappáját' : 'Válaszd ki a célmappát (az almappái a kategóriák)';
   $('browse').style.display = 'flex';
   openLayer('browse');
   await brRender();
 }
-function leaveBrowse() { $('browse').style.display = 'none'; refreshSetup(); }
+function leaveBrowse() { $('browse').style.display = 'none'; refreshEdit(); }
 
 async function brRender() {
   let items = null;
@@ -221,9 +312,12 @@ async function brRender() {
 $('brUp').onclick = () => { br.path = dirName(br.path); brRender(); };
 $('brCancel').onclick = closeLayer;
 $('brOk').onclick = () => {
-  cfg[br.kind] = br.path;
-  if (br.kind === 'dst') cfg.hide = [];
-  saveCfg();
+  E[br.kind] = br.path;
+  if (br.kind === 'dst') E.hide = [];
+  if (br.kind === 'src' && autoName) {            // a profil neve alapból a forrásmappa neve
+    E.name = baseName(br.path); $('edName').value = E.name;
+  }
+  $('edName').placeholder = baseName(E.src) || 'a képek mappájának neve';
   closeLayer();
 };
 $('brNew').onclick = async () => {
@@ -234,46 +328,48 @@ $('brNew').onclick = async () => {
 };
 
 // ---------------------------------------------------------------- munkamenet
-let queue = [];                 // a még besorolatlan képek: {dir, name}
+let queue = [];                 // a még besorolatlan fájlok: {dir, name}
 let qi = 0;
-let rank = new Map();           // kép -> eredeti sorszám (visszavonásnál a helyére kerül vissza)
+let rank = new Map();           // fájl -> eredeti sorszám (visszavonásnál a helyére kerül vissza)
 let cats = [];                  // kategóriák (a célmappa almappái)
-let history_ = lsGet(K.hist, []);   // [{dir, name, from, to}]: a visszavonáshoz (újraindítás után is megvan)
+let hist = [];                  // [{dir, name, from, to, tag}]: a visszavonáshoz (újraindítás után is megvan)
 let sortedCount = 0;
 let busy = false;
 let suppressUntil = 0;
 const relOf = it => join(it.dir, it.name);
+const saveHist = () => { if (hist.length > HIST_MAX) hist = hist.slice(-HIST_MAX); lsSet(K.hist + P.id, hist); };
 
-$('start').onclick = async () => {
+async function startProfile(p) {
   if (!(await refreshPerm())) { toast('Előbb add meg a fájlkezelési engedélyt.', 3000); return; }
-  if (!cfg.src) { alert('Válaszd ki a képek mappáját.'); return; }
-  if (!cfg.dst) { alert('Válaszd ki a célmappát.'); return; }
-  $('start').disabled = true; $('start').textContent = 'Betöltés…';
+  if (!p.src) { alert('Ennél a profilnál nincs kiválasztva a képek mappája. Nyisd meg a ⚙ beállításokat.'); return; }
+  if (!p.dst) { alert('Ennél a profilnál nincs kiválasztva a célmappa. Nyisd meg a ⚙ beállításokat.'); return; }
   try {
-    const dirs = (await subDirs(cfg.dst)).filter(n => !cfg.hide.includes(n));
+    const dirs = (await subDirs(p.dst)).filter(n => !p.hide.includes(n));
     if (!dirs.length) { alert('A célmappában nincs megjelenített almappa. Hozz létre legalább egyet.'); return; }
-    const items = await scanImages(cfg.src, cfg.rec, cfg.dst);
+    const items = await scanMedia(p.src, p.rec, p.dst);
     if (!items.length) { alert('Nincs besorolatlan kép vagy videó a kiválasztott mappában.'); return; }
-    cats = dirs; queue = items; qi = 0; sortedCount = 0;
+    P = p;
+    hist = lsGet(K.hist + P.id, []);
+    cats = dirs; queue = items; qi = 0; sortedCount = 0; pendingTag = '';
     rank = new Map(items.map((it, i) => [it, i]));
     buildPanel();
-    $('setup').style.display = 'none'; $('work').style.display = 'flex';
+    $('home').style.display = 'none'; $('work').style.display = 'flex';
     openLayer('work');
     show();
-    toast('Koppints a képre a mappákhoz (újra koppintva eltűnnek) · húzd el a lapozáshoz · dupla koppintás = nagyítás · jobbra-vissza húzás = fájlnév', 5000);
+    toast('Koppints a képre a mappákhoz (újra koppintva eltűnnek) · húzd el a lapozáshoz · dupla koppintás = nagyítás / videónál szünet · jobbra-vissza húzás = fájlnév', 5000);
   } catch (e) { alert('Hiba: ' + errText(e)); }
-  finally { $('start').disabled = false; $('start').textContent = '▶ Indítás'; }
-};
-
-function leaveWork() {
-  cancelTap(); closeCats(); resetZoom();
-  clearTimeout(infoTimer); $('info').classList.remove('show');
-  preloaded.length = 0; $('img').removeAttribute('src'); unloadVideo();
-  $('work').style.display = 'none'; $('setup').style.display = 'block';
-  refreshSetup();
 }
 
-// ---- gombpanel: Vissza, Menü, majd a mappák, végül az Új mappa ----
+function leaveWork() {
+  cancelTap(); closeCats(); hideTagBar(); resetZoom();
+  clearTimeout(infoTimer); $('info').classList.remove('show');
+  preloaded.length = 0; $('img').removeAttribute('src'); unloadVideo();
+  $('work').style.display = 'none'; $('home').style.display = 'block';
+  P = null;
+  renderHome();
+}
+
+// ---- gombpanel: Vissza, Menü, (sebesség), (címke), majd a mappák, végül az Új mappa ----
 function buildPanel() {
   const box = $('cats');
   box.innerHTML = ''; box.classList.remove('open');
@@ -288,10 +384,12 @@ function buildPanel() {
   mk('☰ Menü', 'act', () => closeLayer());
   speedBtn = mk('', 'act', cycleSpeed);
   updateSpeedBtn();
+  if (P.tags) mk('🏷 Címke', 'tag', openTagBar);
   cats.forEach(c => mk(c, '', () => choose(c)));
   mk('＋ Új mappa', 'new', newCategory);
 }
 function openCats() {
+  commitTag();                          // a címkesáv eltűnik, a beírt címke megmarad
   const box = $('cats');
   box.classList.add('open');
   box.style.gridAutoColumns = btn.w ? `minmax(0, ${btn.w}px)` : 'minmax(0, max-content)';
@@ -306,12 +404,56 @@ async function newCategory() {
   const name = (prompt('Az új mappa neve:') || '').trim().replace(/[\\/]/g, '');
   if (!name) return;
   try {
-    await AllFiles.mkdirs({ path: join(cfg.dst, name) });
-    cfg.hide = cfg.hide.filter(x => x !== name); saveCfg();
-    cats = (await subDirs(cfg.dst)).filter(n => !cfg.hide.includes(n));
+    await AllFiles.mkdirs({ path: join(P.dst, name) });
+    P.hide = P.hide.filter(x => x !== name); saveProfiles();
+    cats = (await subDirs(P.dst)).filter(n => !P.hide.includes(n));
     buildPanel(); openCats();
     toast('Létrehozva: ' + name);
   } catch (e) { toast('Nem sikerült: ' + errText(e), 3500); }
+}
+
+// ---- címkézés (nem kötelező) ----
+let pendingTag = '';
+const cleanTag = s => String(s || '').replace(/[\t\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+function showTagInfo() { $('tg').textContent = pendingTag ? '🏷 ' + pendingTag : ''; }
+function renderChips() {
+  const freq = lsGet(K.tags, {});
+  const top = Object.entries(freq).sort((a, b) => b[1] - a[1] || coll.compare(a[0], b[0])).slice(0, 14).map(e => e[0]);
+  const box = $('tagChips'); box.innerHTML = '';
+  for (const t of top) {
+    const b = document.createElement('button'); b.textContent = t;
+    b.onclick = () => { const v = $('tagIn').value.trim(); $('tagIn').value = v ? v + ' ' + t : t; };
+    box.appendChild(b);
+  }
+}
+function openTagBar() {
+  closeCats();
+  renderChips();
+  $('tagIn').value = pendingTag;
+  $('tagbar').style.display = 'block';
+  setTimeout(() => { try { $('tagIn').focus(); } catch {} }, 50);
+}
+function hideTagBar() { $('tagbar').style.display = 'none'; try { $('tagIn').blur(); } catch {} }
+function commitTag() {
+  if ($('tagbar').style.display === 'block') { pendingTag = cleanTag($('tagIn').value); hideTagBar(); showTagInfo(); if (pendingTag) showInfo(2500); }
+}
+function clearTag() { pendingTag = ''; hideTagBar(); showTagInfo(); }
+$('tagOk').onclick = () => { commitTag(); toast(pendingTag ? 'Címke: ' + pendingTag : 'Nincs címke', 1200); };
+$('tagX').onclick = () => { clearTag(); };
+$('tagIn').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('tagOk').click(); } });
+for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'click']) $('tagbar').addEventListener(ev, e => e.stopPropagation());
+function noteTag(tag) {
+  const f = lsGet(K.tags, {});
+  f[tag] = (f[tag] || 0) + 1;
+  lsSet(K.tags, f);
+}
+async function removeTagLine(to, tag) {
+  const path = join(P.dst, TAG_FILE);
+  const want = baseName(to) + '\t' + tag;
+  const text = (await AllFiles.readText({ path })).text || '';
+  const lines = text.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) if (lines[i] === want) { lines.splice(i, 1); break; }
+  await AllFiles.writeText({ path, text: lines.join('\n') });
 }
 
 // ---- nagyítás (dupla koppintás) ----
@@ -392,14 +534,6 @@ st.addEventListener('pointerup', e => {
   if (Math.abs(dx) < 15 && Math.abs(dy) < 15) tap(e.clientX, e.clientY);
 });
 
-// ---- megjelenítés és lapozás ----
-const preloaded = [];                    // az előre betöltött szomszédos képek (hogy a böngésző meg ne feledkezzen róluk)
-function updateInfo() {
-  const it = queue[qi];
-  if (!it) { $('pos').textContent = 'Nincs több besorolatlan kép 🎉'; $('fn').textContent = ''; return; }
-  $('pos').textContent = `${qi + 1}/${queue.length}` + (sortedCount ? ` · ${sortedCount} besorolva` : '');
-  $('fn').textContent = relOf(it);
-}
 // ---- videó ----
 let speedBtn = null;
 const SPEEDS = [1, 1.2, 1.5, 2];
@@ -417,15 +551,15 @@ function togglePlay() {
   else { v.pause(); toast('⏸', 500); }
 }
 function updateSpeedBtn() {
-  if (!speedBtn) return;
-  speedBtn.textContent = '⏩ ' + rate.toFixed(1) + '×';
+  if (!speedBtn || !P) return;
+  speedBtn.textContent = '⏩ ' + P.rate.toFixed(1) + '×';
   speedBtn.style.display = curIsVideo() ? '' : 'none';
 }
 function cycleSpeed() {
-  const i = SPEEDS.findIndex(s => Math.abs(s - rate) < 0.05);
-  rate = SPEEDS[(i + 1) % SPEEDS.length];
-  lsSet(K.rate, rate); applyRate();
-  $('vid').playbackRate = rate;
+  const i = SPEEDS.findIndex(s => Math.abs(s - P.rate) < 0.05);
+  P.rate = SPEEDS[(i + 1) % SPEEDS.length];
+  saveProfiles();
+  $('vid').playbackRate = P.rate;
   updateSpeedBtn();
 }
 const fmtTime = s => { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
@@ -440,7 +574,7 @@ function updateSeek() {
   const v = $('vid');
   v.addEventListener('timeupdate', updateSeek);
   v.addEventListener('durationchange', updateSeek);
-  v.addEventListener('loadedmetadata', () => { v.playbackRate = rate; updateSeek(); });
+  v.addEventListener('loadedmetadata', () => { if (P) v.playbackRate = P.rate; updateSeek(); });
   const seekEl = $('seek');
   let seeking = false;
   const seekTo = e => {
@@ -456,11 +590,20 @@ function updateSeek() {
 document.addEventListener('visibilitychange', () => {
   const v = $('vid');
   if (document.hidden) { try { v.pause(); } catch {} }
-  else if (layer === 'work' && curIsVideo()) { const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); }
+  else if (topLayer() === 'work' && curIsVideo()) { const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); }
 });
 
+// ---- megjelenítés és lapozás ----
+const preloaded = [];                    // az előre betöltött szomszédos képek
+function updateInfo() {
+  const it = queue[qi];
+  if (!it) { $('pos').textContent = 'Nincs több besorolatlan fájl 🎉'; $('fn').textContent = ''; return; }
+  $('pos').textContent = `${qi + 1}/${queue.length}` + (sortedCount ? ` · ${sortedCount} besorolva` : '');
+  $('fn').textContent = relOf(it);
+}
 function show() {
   resetZoom();
+  clearTag();
   const it = queue[qi];
   const img = $('img'), vid = $('vid');
   updateInfo();
@@ -474,9 +617,9 @@ function show() {
     $('work').classList.add('video');
     vid.style.display = 'block';
     vid.onerror = () => toast('Nem játszható le: ' + it.name, 3000);
-    vid.defaultPlaybackRate = rate;
+    vid.defaultPlaybackRate = P.rate;
     vid.src = srcFor(relOf(it));
-    vid.playbackRate = rate;
+    vid.playbackRate = P.rate;
     updateSeek();
     const pr = vid.play(); if (pr && pr.catch) pr.catch(() => {});
     return;
@@ -491,15 +634,13 @@ function go(delta) {
   cancelTap();
   if (!queue.length) return;
   const n = qi + delta;
-  if (n < 0) { toast('Ez az első kép'); return; }
-  if (n >= queue.length) { toast('Ez az utolsó kép'); return; }
+  if (n < 0) { toast('Ez az első fájl'); return; }
+  if (n >= queue.length) { toast('Ez az utolsó fájl'); return; }
   closeCats();
   qi = n; show();
 }
 
 // ---- besorolás (a fájl azonnal átkerül a mappába) és visszavonás ----
-function saveHist() { if (history_.length > HIST_MAX) history_ = history_.slice(-HIST_MAX); lsSet(K.hist, history_); }
-
 async function choose(cat) {
   if (busy) return;
   const it = queue[qi];
@@ -507,14 +648,20 @@ async function choose(cat) {
   busy = true;
   try {
     const from = relOf(it);
+    const tag = P.tags ? cleanTag(pendingTag) : '';
     if (isVideo(it.name)) unloadVideo();       // a lejátszó engedje el a fájlt
-    const to = await moveUnique(from, join(cfg.dst, cat), it.name);
-    history_.push({ dir: it.dir, name: it.name, from, to }); saveHist();
+    const to = await moveUnique(from, join(P.dst, cat), it.name);
+    let savedTag = '';
+    if (tag) {
+      try { await AllFiles.appendText({ path: join(P.dst, TAG_FILE), text: baseName(to) + '\t' + tag + '\n' }); savedTag = tag; noteTag(tag); }
+      catch (e) { toast('A címkét nem sikerült elmenteni: ' + errText(e), 4000); }
+    }
+    hist.push({ dir: it.dir, name: it.name, from, to, tag: savedTag }); saveHist();
     queue.splice(qi, 1); sortedCount++;
     cancelTap(); closeCats();
     if (qi >= queue.length) qi = queue.length - 1;
-    if (!queue.length) { qi = 0; show(); toast('Minden kép besorolva 🎉', 3000); return; }
-    toast(`→ ${cat}`);
+    if (!queue.length) { qi = 0; show(); toast('Minden fájl besorolva 🎉', 3000); return; }
+    toast(`→ ${cat}` + (savedTag ? '  🏷 ' + savedTag : ''));
     show();
   } catch (e) { toast('Nem sikerült áthelyezni: ' + errText(e), 4000); if (curIsVideo()) show(); }
   finally { busy = false; }
@@ -522,12 +669,14 @@ async function choose(cat) {
 
 async function undo() {
   if (busy) return;
-  const h = history_[history_.length - 1];
+  const h = hist[hist.length - 1];
   if (!h) { toast('Nincs mit visszavonni'); return; }
   busy = true;
   try {
+    if (curIsVideo()) unloadVideo();
     const back = await moveUnique(h.to, h.dir, h.name);
-    history_.pop(); saveHist(); sortedCount = Math.max(0, sortedCount - 1);
+    if (h.tag) { try { await removeTagLine(h.to, h.tag); } catch (e) { toast('A címkesort nem sikerült törölni: ' + errText(e), 4000); } }
+    hist.pop(); saveHist(); sortedCount = Math.max(0, sortedCount - 1);
     const it = [...rank.keys()].find(k => k.dir === h.dir && k.name === h.name) || { dir: h.dir, name: h.name };
     it.name = baseName(back);
     if (!rank.has(it)) rank.set(it, -1);
@@ -540,13 +689,13 @@ async function undo() {
     cancelTap(); closeCats();
     show();
     toast('Visszavonva');
-  } catch (e) { toast('Nem sikerült visszavonni: ' + errText(e), 4000); }
+  } catch (e) { toast('Nem sikerült visszavonni: ' + errText(e), 4000); if (curIsVideo()) show(); }
   finally { busy = false; }
 }
 
 // Billentyűk (asztali teszteléshez)
 document.addEventListener('keydown', e => {
-  if ($('work').style.display !== 'flex') return;
+  if ($('work').style.display !== 'flex' || (e.target && e.target.tagName === 'INPUT')) return;
   if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); go(1); }
   else if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1); }
   else if (e.key === 'Backspace') undo();
@@ -555,16 +704,11 @@ document.addEventListener('keydown', e => {
 
 // ---------------------------------------------------------------- indulás
 async function init() {
-  cfg.src = cleanPath(lsGet(K.src, ''));
-  cfg.dst = cleanPath(lsGet(K.dst, ''));
-  cfg.rec = !!lsGet(K.rec, false);
-  cfg.hide = lsGet(K.hide, []);
   const o = lsGet(K.btn, null);
-  if (o) { btn.h = clamp(+o.h || 68, 40, 140); btn.w = clamp(+o.w || 0, 0, 500); }
+  if (o) { btn.h = clamp(+o.h || 68, 40, 140); btn.w = clamp(+o.w || 0, 0, 600); }
   applyBtn();
-  rate = clamp(+lsGet(K.rate, 1.2) || 1.2, 0.5, 2.5); applyRate();
-  showPath($('srcPath'), cfg.src); showPath($('dstPath'), cfg.dst);
-  $('rec').checked = cfg.rec;
-  if (await refreshPerm()) refreshSetup();
+  loadProfiles();
+  renderHome();
+  await refreshPerm();
 }
 init();

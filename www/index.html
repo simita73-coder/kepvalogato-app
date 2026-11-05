@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Képválogató</title>
+<title>Kép-videó válogató</title>
 <style>
   :root { --bg:#161616; --fg:#eee; --bt:#2c2c2c; --acc:#3d8bfd; --ok:#7ddf7d; --bad:#ff7b7b; --bh:68px; --bfs:25px; }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
@@ -11,15 +11,17 @@
   button { background:var(--bt); color:var(--fg); border:1px solid #444; border-radius:10px; padding:12px 8px; font-size:16px; }
   button:active { background:#444; }
   button.acc { background:var(--acc); border-color:var(--acc); }
+  button.warn { border-color:#a55; color:#f99; }
   button:disabled { opacity:.5; }
   small { color:#aaa; }
   a { color:#7fb0ff; }
+  input[type=text], input[type=number] { width:100%; padding:12px 10px; font-size:17px; color:var(--fg); background:#222; border:1px solid #555; border-radius:8px; }
 
-  /* Beállító képernyő */
-  #setup { padding:14px; padding-top:calc(14px + env(safe-area-inset-top)); padding-bottom:calc(24px + env(safe-area-inset-bottom));
-           overflow:auto; height:100dvh; }
-  #setup h2 { margin:.2em 0 .6em; }
-  #setup h3 { margin:1.2em 0 .3em; }
+  /* Közös képernyő-keret (profillista és profilbeállítás) */
+  .screen { display:none; padding:14px; padding-top:calc(14px + env(safe-area-inset-top)); padding-bottom:calc(24px + env(safe-area-inset-bottom));
+            overflow:auto; height:100dvh; }
+  .screen h2 { margin:.2em 0 .6em; }
+  .screen h3 { margin:1.2em 0 .3em; }
   .row { display:flex; gap:8px; margin:10px 0; flex-wrap:wrap; }
   .row > * { flex:1; }
   .box { padding:10px; border:1px solid #444; border-radius:10px; background:#1f1f1f; line-height:1.4; }
@@ -30,9 +32,19 @@
   label.chk { display:flex; align-items:center; gap:10px; padding:8px 0; font-size:16px; }
   label.chk input { width:22px; height:22px; flex:none; }
   #catList { display:grid; grid-template-columns:1fr 1fr; gap:0 12px; }
-  .slider { margin:10px 0; }
-  .slider label { display:block; margin-bottom:4px; }
-  .slider input { width:100%; }
+  .fld { margin:10px 0; }
+  .fld label { display:block; margin-bottom:4px; color:#ccc; }
+  .two { display:flex; gap:10px; }
+  .two > div { flex:1; }
+
+  /* Profilkártyák */
+  .card { margin:10px 0; padding:12px; border:1px solid #444; border-radius:12px; background:#1f1f1f; }
+  .card .nm { font-size:20px; font-weight:600; word-break:break-word; }
+  .card .pp { font-size:13px; color:#aaa; margin:4px 0 8px; word-break:break-all; }
+  .card .row { margin:6px 0 0; }
+  .card .row button:first-child { flex:3; padding:14px 8px; font-size:18px; }
+  .card .row button:last-child { flex:1; }
+
   #bprev { display:inline-block; margin:6px 0; height:var(--bh); line-height:calc(var(--bh) - 4px); padding:0 22px; font-size:var(--bfs);
            font-weight:600; border-radius:14px; background:#2a2a2a; border:1px solid #666; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
 
@@ -68,6 +80,7 @@
           opacity:0; transition:opacity .25s; }
   #info.show { opacity:1; }
   #info .fn { font-size:12px; color:#bbb; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #info .tg { font-size:13px; color:#9fd29f; }
 
   /* Gombpanel: a kép megérintésére jön elő. A tartó átlátszik az érintésnek, csak a gombok fogják meg. */
   #cats { position:absolute; top:max(8px, env(safe-area-inset-top)); right:8px; bottom:max(8px, env(safe-area-inset-bottom));
@@ -81,6 +94,16 @@
                  pointer-events:auto; }
   #cats button.act { background:rgba(60,60,70,.95); border-color:#999; }
   #cats button.new { background:rgba(40,60,40,.93); border-color:#6a9; }
+  #cats button.tag { background:rgba(40,70,40,.95); border-color:#7c7; }
+
+  /* Címke sáv (felül, hogy a billentyűzet ne takarja) */
+  #tagbar { position:absolute; left:8px; right:8px; top:max(8px, env(safe-area-inset-top)); z-index:8; display:none;
+            background:rgba(10,10,10,.92); border:1px solid #666; border-radius:14px; padding:8px; }
+  #tagbar .trow { display:flex; gap:6px; }
+  #tagbar input { flex:1; min-width:0; -webkit-user-select:text; user-select:text; }
+  #tagbar button { flex:none; padding:10px 14px; font-size:18px; }
+  #tagChips { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  #tagChips button { padding:7px 12px; font-size:15px; border-radius:16px; }
 
   #toast { position:fixed; left:50%; bottom:calc(24px + env(safe-area-inset-bottom)); transform:translateX(-50%); background:#000c; padding:8px 14px;
            border-radius:20px; display:none; z-index:30; max-width:90vw; text-align:center; pointer-events:none; }
@@ -88,42 +111,60 @@
 </head>
 <body>
 
-<div id="setup">
-  <h2>Képválogató <span id="ver" style="font-size:.6em;font-weight:400;color:#aaa"></span></h2>
+<!-- 1. Profillista (kezdőképernyő) -->
+<div id="home" class="screen" style="display:block">
+  <h2>Kép-videó válogató <span id="ver" style="font-size:.6em;font-weight:400;color:#aaa"></span></h2>
 
   <div id="perm" class="box">Ellenőrzés…</div>
   <div class="row"><button class="acc" id="permBtn" style="display:none">Engedély megadása (minden fájl kezelése)</button></div>
 
-  <h3>1. Képek / videók mappája</h3>
-  <small>Ezekből a képekből és videókból válogat. A besorolt kép innen átkerül a célmappába, ezért a lista mindig csak a még besorolatlanokat mutatja.</small>
+  <h3>Profilok</h3>
+  <div id="profList"></div>
+  <div class="row"><button id="newProf">＋ Új profil</button></div>
+
+  <h3>Mappagombok mérete <small>(minden profilra, ezen az eszközön)</small></h3>
+  <div class="two">
+    <div class="fld"><label for="bhIn">Magasság (px)</label><input type="number" id="bhIn" inputmode="numeric" min="40" max="140"></div>
+    <div class="fld"><label for="bwIn">Szélesség (px, 0 = automatikus)</label><input type="number" id="bwIn" inputmode="numeric" min="0" max="600"></div>
+  </div>
+  <div id="bprev">Minta mappa</div>
+  <div class="row"><button class="acc" id="bapply">Alkalmaz</button><button id="bdef">Alaphelyzet</button></div>
+
+  <p><small><a href="proba.html">Fájlmozgatás próba (diagnosztika)</a></small></p>
+</div>
+
+<!-- 2. Profil beállítása -->
+<div id="edit" class="screen">
+  <h2 id="edTitle">Profil</h2>
+
+  <div class="fld"><label for="edName">Profil neve</label><input type="text" id="edName" autocomplete="off"><small>Alapból a képek mappájának neve.</small></div>
+
+  <h3>Képek / videók mappája (in)</h3>
+  <small>Ebből a mappából válogat. A besorolt fájl innen átkerül a célmappába, ezért a lista mindig csak a még besorolatlanokat mutatja.</small>
   <div class="path" id="srcPath"></div>
   <div class="row"><button id="srcBtn">📁 Mappa kiválasztása</button></div>
   <label class="chk"><input type="checkbox" id="rec"> Az almappákban lévő fájlokat is</label>
   <div id="srcInfo"><small></small></div>
 
-  <h3>2. Célmappa</h3>
-  <small>Az ebben lévő almappák lesznek a kategóriagombok. Itt hozhatsz létre újat is a mappaválasztóban.</small>
+  <h3>Célmappa (out)</h3>
+  <small>Az ebben lévő almappák lesznek a kategóriagombok. Új mappát a mappaválasztóban is létrehozhatsz.</small>
   <div class="path" id="dstPath"></div>
   <div class="row"><button id="dstBtn">📁 Mappa kiválasztása</button></div>
   <small>Melyik almappák jelenjenek meg gombként?</small>
   <div id="catList"></div>
 
-  <h3>Mappagombok mérete <small>(ezen az eszközön külön tárolja)</small></h3>
-  <div class="slider"><label for="bh">Magasság: <b id="bhVal"></b></label>
-    <input type="range" id="bh" min="40" max="140" step="2"></div>
-  <div class="slider"><label for="bw">Szélesség: <b id="bwVal"></b></label>
-    <input type="range" id="bw" min="0" max="500" step="10"></div>
-  <div id="bprev">Minta mappa</div>
-  <div class="row"><button id="bdef">Alaphelyzet</button></div>
-
   <h3>Videók lejátszási sebessége</h3>
-  <div class="slider"><label for="rate">Sebesség: <b id="rateVal"></b></label>
-    <input type="range" id="rate" min="0.5" max="2.5" step="0.1"></div>
+  <div class="fld"><input type="text" id="edRate" inputmode="decimal" autocomplete="off" placeholder="pl. 1.2"><small>0,5 és 2,5 között.</small></div>
 
-  <div class="row"><button class="acc" id="start" style="padding:18px 8px;font-size:19px">▶ Indítás</button></div>
-  <p><small><a href="proba.html">Fájlmozgatás próba (diagnosztika)</a></small></p>
+  <h3>Címkézés</h3>
+  <label class="chk"><input type="checkbox" id="edTags"> Címke megadható a fájlokhoz (nem kötelező)</label>
+  <small>A címkék a célmappában a <b>cimkek.txt</b> fájlba kerülnek: soronként a fájlnév, tabulátor, a címke.</small>
+
+  <div class="row" style="margin-top:22px"><button class="acc" id="edSave" style="padding:16px 8px;font-size:18px">✔ Mentés</button><button id="edCancel">Mégse</button></div>
+  <div class="row"><button class="warn" id="edDelete">🗑 Profil törlése</button></div>
 </div>
 
+<!-- 3. Mappaválasztó -->
 <div id="browse">
   <div id="brHead">
     <div id="brTitle"></div>
@@ -139,12 +180,21 @@
   </div>
 </div>
 
+<!-- 4. Munkafelület -->
 <div id="work">
   <div id="stage">
     <img id="img" alt="" draggable="false">
     <video id="vid" playsinline loop></video>
-    <div id="info"><div id="pos"></div><div class="fn" id="fn"></div></div>
+    <div id="info"><div id="pos"></div><div class="fn" id="fn"></div><div class="tg" id="tg"></div></div>
     <div id="cats"></div>
+    <div id="tagbar">
+      <div class="trow">
+        <input type="text" id="tagIn" placeholder="Címke (2–3 szó)" autocomplete="off" autocapitalize="off" enterkeyhint="done">
+        <button class="acc" id="tagOk">✔</button>
+        <button id="tagX">✕</button>
+      </div>
+      <div id="tagChips"></div>
+    </div>
     <div id="seek"><div class="time" id="seekTime"></div><div class="track"><div class="fill" id="seekFill"></div><div class="knob" id="seekKnob"></div></div></div>
   </div>
 </div>
