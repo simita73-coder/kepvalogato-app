@@ -97,13 +97,18 @@
   #cats button.tag { background:rgba(40,70,40,.95); border-color:#7c7; }
 
   /* Címke sáv (felül, hogy a billentyűzet ne takarja) */
-  #tagbar { position:absolute; left:8px; right:8px; top:max(8px, env(safe-area-inset-top)); z-index:8; display:none;
+  #tagbar { position:absolute; left:8px; right:8px; top:max(8px, env(safe-area-inset-top)); z-index:8; display:none; touch-action:manipulation;
             background:rgba(10,10,10,.92); border:1px solid #666; border-radius:14px; padding:8px; }
   #tagbar .trow { display:flex; gap:6px; }
   #tagbar input { flex:1; min-width:0; -webkit-user-select:text; user-select:text; }
   #tagbar button { flex:none; padding:10px 14px; font-size:18px; }
-  #tagChips { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  #tagChips { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; max-height:34vh; overflow-y:auto; touch-action:pan-y; -webkit-overflow-scrolling:touch; }
   #tagChips button { padding:7px 12px; font-size:15px; border-radius:16px; }
+
+  /* Profilváltó (a munkafelületről) */
+  #profPick { display:none; position:fixed; inset:0; background:rgba(0,0,0,.8); z-index:25; align-items:center; justify-content:center; padding:16px; }
+  #profPick .pbox { width:100%; max-width:420px; max-height:80vh; overflow:auto; background:#1b1b1b; border:1px solid #555; border-radius:14px; padding:12px; }
+  #profPick .ptitle { font-weight:600; margin:0 0 8px; }
 
   #toast { position:fixed; left:50%; bottom:calc(24px + env(safe-area-inset-bottom)); transform:translateX(-50%); background:#000c; padding:8px 14px;
            border-radius:20px; display:none; z-index:30; max-width:90vw; text-align:center; pointer-events:none; }
@@ -128,7 +133,7 @@
     <div class="fld"><label for="bwIn">Szélesség (px, 0 = automatikus)</label><input type="number" id="bwIn" inputmode="numeric" min="0" max="600"></div>
   </div>
   <div id="bprev">Minta mappa</div>
-  <div class="row"><button class="acc" id="bapply">Alkalmaz</button><button id="bdef">Alaphelyzet</button></div>
+  <div class="row"><button class="acc" id="bapply">Alkalmaz</button></div>
 
   <p><small><a href="proba.html">Fájlmozgatás próba (diagnosztika)</a></small></p>
 </div>
@@ -187,7 +192,9 @@
     <video id="vid" playsinline loop></video>
     <div id="info"><div id="pos"></div><div class="fn" id="fn"></div><div class="tg" id="tg"></div></div>
     <div id="cats"></div>
-    <div id="tagbar">
+    <div id="seek"><div class="time" id="seekTime"></div><div class="track"><div class="fill" id="seekFill"></div><div class="knob" id="seekKnob"></div></div></div>
+  </div>
+  <div id="tagbar">
       <div class="trow">
         <input type="text" id="tagIn" placeholder="Címke (2–3 szó)" autocomplete="off" autocapitalize="off" enterkeyhint="done">
         <button class="acc" id="tagOk">✔</button>
@@ -195,9 +202,8 @@
       </div>
       <div id="tagChips"></div>
     </div>
-    <div id="seek"><div class="time" id="seekTime"></div><div class="track"><div class="fill" id="seekFill"></div><div class="knob" id="seekKnob"></div></div></div>
-  </div>
 </div>
+<div id="profPick"><div class="pbox"><div class="ptitle">Váltás másik profilra</div><div id="profPickList"></div><button id="profPickX" style="width:100%;margin-top:8px">Mégse</button></div></div>
 <div id="toast"></div>
 
 <script src="main.js"></script>

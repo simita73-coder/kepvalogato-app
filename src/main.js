@@ -4,7 +4,7 @@ import { Capacitor, registerPlugin } from '@capacitor/core';
 // A __MOCK_ALLFILES__ csak az automatikus tesztekhez van.
 const AllFiles = window.__MOCK_ALLFILES__ || registerPlugin('AllFiles');
 
-const VERSION = 'v3.0';
+const VERSION = 'v3.1';
 const $ = id => document.getElementById(id);
 const IMG_EXT = /\.(jpe?g|jfif|pjpe?g|pjp|png|webp|gif|bmp|avif|heic|heif)$/i;
 const VID_EXT = /\.(mp4|m4v|webm|mov|3gp|mkv|ogv|avi)$/i;
@@ -188,7 +188,6 @@ $('bapply').onclick = () => {
   btn.w = isFinite(w) && w > 0 ? clamp(w, 60, 600) : 0;
   lsSet(K.btn, btn); applyBtn(); toast('Alkalmazva');
 };
-$('bdef').onclick = () => { btn = { h: 68, w: 0 }; lsSet(K.btn, btn); applyBtn(); };
 
 // ---------------------------------------------------------------- profil szerkesztése
 function showPath(el, p) {
@@ -339,35 +338,63 @@ let suppressUntil = 0;
 const relOf = it => join(it.dir, it.name);
 const saveHist = () => { if (hist.length > HIST_MAX) hist = hist.slice(-HIST_MAX); lsSet(K.hist + P.id, hist); };
 
-async function startProfile(p) {
+async function startProfile(p, switching = false) {
   if (!(await refreshPerm())) { toast('Előbb add meg a fájlkezelési engedélyt.', 3000); return; }
   if (!p.src) { alert('Ennél a profilnál nincs kiválasztva a képek mappája. Nyisd meg a ⚙ beállításokat.'); return; }
   if (!p.dst) { alert('Ennél a profilnál nincs kiválasztva a célmappa. Nyisd meg a ⚙ beállításokat.'); return; }
+  if (switching) toast('Profil betöltése…', 20000);
   try {
     const dirs = (await subDirs(p.dst)).filter(n => !p.hide.includes(n));
     if (!dirs.length) { alert('A célmappában nincs megjelenített almappa. Hozz létre legalább egyet.'); return; }
     const items = await scanMedia(p.src, p.rec, p.dst);
-    if (!items.length) { alert('Nincs besorolatlan kép vagy videó a kiválasztott mappában.'); return; }
+    if (!items.length) { alert('Nincs besorolatlan kép vagy videó ebben a profilban: ' + profTitle(p)); return; }
+    if (switching) teardownWork();                 // az előző profil munkafelülete lezárul
     P = p;
     hist = lsGet(K.hist + P.id, []);
     cats = dirs; queue = items; qi = 0; sortedCount = 0; pendingTag = '';
     rank = new Map(items.map((it, i) => [it, i]));
+    if (P.tags) await loadTagFreq();
     buildPanel();
-    $('home').style.display = 'none'; $('work').style.display = 'flex';
-    openLayer('work');
+    if (!switching) {
+      $('home').style.display = 'none'; $('work').style.display = 'flex';
+      openLayer('work');
+    }
     show();
-    toast('Koppints a képre a mappákhoz (újra koppintva eltűnnek) · húzd el a lapozáshoz · dupla koppintás = nagyítás / videónál szünet · jobbra-vissza húzás = fájlnév', 5000);
+    if (switching) toast('Profil: ' + profTitle(P), 2000);
+    else toast('Koppints a képre a mappákhoz (újra koppintva eltűnnek; videónál közben szünetel) · húzd el a lapozáshoz · dupla koppintás = nagyítás / videónál szünet · jobbra-vissza húzás = fájlnév', 6000);
   } catch (e) { alert('Hiba: ' + errText(e)); }
+  finally { if (switching) { const el = $('toast'); if (el.textContent === 'Profil betöltése…') el.style.display = 'none'; } }
 }
 
-function leaveWork() {
+function teardownWork() {
   cancelTap(); closeCats(); hideTagBar(); resetZoom();
   clearTimeout(infoTimer); $('info').classList.remove('show');
   preloaded.length = 0; $('img').removeAttribute('src'); unloadVideo();
+  $('profPick').style.display = 'none';
+}
+function leaveWork() {
+  teardownWork();
   $('work').style.display = 'none'; $('home').style.display = 'block';
   P = null;
   renderHome();
 }
+
+// ---- profilváltó a munkafelületről ----
+function openProfPick() {
+  closeCats();
+  const box = $('profPickList');
+  box.innerHTML = '';
+  for (const p of profiles) {
+    const b = document.createElement('button');
+    b.textContent = (p === P ? '● ' : '') + profTitle(p);
+    if (p === P) b.className = 'acc';
+    b.style.cssText = 'display:block;width:100%;margin:5px 0;padding:14px;font-size:18px;text-align:left';
+    b.onclick = () => { $('profPick').style.display = 'none'; if (p !== P) startProfile(p, true); };
+    box.appendChild(b);
+  }
+  $('profPick').style.display = 'flex';
+}
+$('profPickX').onclick = () => { $('profPick').style.display = 'none'; };
 
 // ---- gombpanel: Vissza, Menü, (sebesség), (címke), majd a mappák, végül az Új mappa ----
 function buildPanel() {
@@ -382,6 +409,7 @@ function buildPanel() {
   };
   mk('↩ Vissza', 'act', undo);
   mk('☰ Menü', 'act', () => closeLayer());
+  mk('⇄ Profil', 'act', openProfPick);
   speedBtn = mk('', 'act', cycleSpeed);
   updateSpeedBtn();
   if (P.tags) mk('🏷 Címke', 'tag', openTagBar);
@@ -390,6 +418,7 @@ function buildPanel() {
 }
 function openCats() {
   commitTag();                          // a címkesáv eltűnik, a beírt címke megmarad
+  if (curIsVideo()) { const v = $('vid'); if (!v.paused) { v.pause(); pausedByPanel = true; } }   // a panel alatt a videó szünetel
   const box = $('cats');
   box.classList.add('open');
   box.style.gridAutoColumns = btn.w ? `minmax(0, ${btn.w}px)` : 'minmax(0, max-content)';
@@ -398,7 +427,10 @@ function openCats() {
   const rows = Math.max(1, Math.floor((avail + 6) / (btn.h + 6)));
   box.style.gridTemplateRows = `repeat(${rows}, ${btn.h}px)`;
 }
-function closeCats() { $('cats').classList.remove('open'); }
+function closeCats() {
+  $('cats').classList.remove('open');
+  if (pausedByPanel) { pausedByPanel = false; resumeVideo(); }     // a panel bezárásakor a videó folytatódik
+}
 
 async function newCategory() {
   const name = (prompt('Az új mappa neve:') || '').trim().replace(/[\\/]/g, '');
@@ -413,23 +445,61 @@ async function newCategory() {
 }
 
 // ---- címkézés (nem kötelező) ----
+// A címke vesszővel elválasztott tételekből áll (pl. "N6, hajlékony lányok"). Az ajánlás a tételeket egyesével kínálja,
+// gyakoriság szerint (a leggyakoribb elöl, görgethető). A tétel első 2+ karakterének beírása után csak az ezzel kezdődők
+// (vagy amelyeknek valamelyik szava ezzel kezdődik) maradnak.
 let pendingTag = '';
-const cleanTag = s => String(s || '').replace(/[\t\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+let tagFreq = {};                        // tétel -> előfordulás
+const normTxt = s => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const tagItems = s => String(s || '').split(',').map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+function cleanTag(s) {
+  const seen = new Set(), out = [];
+  for (const x of tagItems(s)) { const k = normTxt(x); if (!seen.has(k)) { seen.add(k); out.push(x); } }
+  return out.join(', ');
+}
+function addFreq(tag, d) {
+  for (const x of tagItems(tag)) { tagFreq[x] = (tagFreq[x] || 0) + d; if (tagFreq[x] <= 0) delete tagFreq[x]; }
+  lsSet(K.tags, tagFreq);
+}
+/** A gyakoriságok a célmappa cimkek.txt fájljából (ha nincs: az utoljára mentett helyi adatból). */
+async function loadTagFreq() {
+  tagFreq = {};
+  try {
+    const txt = (await AllFiles.readText({ path: join(P.dst, TAG_FILE) })).text || '';
+    for (const line of txt.split('\n')) {
+      const i = line.indexOf('\t');
+      if (i > 0) for (const x of tagItems(line.slice(i + 1))) tagFreq[x] = (tagFreq[x] || 0) + 1;
+    }
+  } catch {
+    const old = lsGet(K.tags, {});
+    for (const [k, v] of Object.entries(old)) for (const x of tagItems(k)) tagFreq[x] = (tagFreq[x] || 0) + (+v || 1);
+  }
+}
+function suggestions(fragment, used) {
+  const f = normTxt(fragment.trim());
+  let arr = Object.entries(tagFreq).filter(([x]) => !used.has(normTxt(x)));
+  if (f.length >= 2) arr = arr.filter(([x]) => { const n = normTxt(x); return n.startsWith(f) || n.split(' ').some(w => w.startsWith(f)); });
+  arr.sort((a, b) => b[1] - a[1] || coll.compare(a[0], b[0]));
+  return arr.slice(0, 80).map(e => e[0]);
+}
 function showTagInfo() { $('tg').textContent = pendingTag ? '🏷 ' + pendingTag : ''; }
 function renderChips() {
-  const freq = lsGet(K.tags, {});
-  const top = Object.entries(freq).sort((a, b) => b[1] - a[1] || coll.compare(a[0], b[0])).slice(0, 14).map(e => e[0]);
-  const box = $('tagChips'); box.innerHTML = '';
-  for (const t of top) {
-    const b = document.createElement('button'); b.textContent = t;
-    b.onclick = () => { const v = $('tagIn').value.trim(); $('tagIn').value = v ? v + ' ' + t : t; };
+  const v = $('tagIn').value, c = v.lastIndexOf(',');
+  const before = v.slice(0, c + 1).trim(), frag = v.slice(c + 1);
+  const used = new Set(tagItems(before).map(normTxt));
+  const box = $('tagChips'); box.innerHTML = ''; box.scrollTop = 0;
+  for (const x of suggestions(frag, used)) {
+    const b = document.createElement('button'); b.textContent = x;
+    b.onmousedown = e => e.preventDefault();                       // a beviteli mező megtartja a fókuszt
+    b.onclick = () => { $('tagIn').value = (before ? before + ' ' : '') + x + ', '; renderChips(); try { $('tagIn').focus(); } catch {} };
     box.appendChild(b);
   }
 }
+$('tagIn').addEventListener('input', renderChips);
 function openTagBar() {
   closeCats();
+  $('tagIn').value = pendingTag ? pendingTag + ', ' : '';
   renderChips();
-  $('tagIn').value = pendingTag;
   $('tagbar').style.display = 'block';
   setTimeout(() => { try { $('tagIn').focus(); } catch {} }, 50);
 }
@@ -442,11 +512,7 @@ $('tagOk').onclick = () => { commitTag(); toast(pendingTag ? 'Címke: ' + pendin
 $('tagX').onclick = () => { clearTag(); };
 $('tagIn').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('tagOk').click(); } });
 for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'click']) $('tagbar').addEventListener(ev, e => e.stopPropagation());
-function noteTag(tag) {
-  const f = lsGet(K.tags, {});
-  f[tag] = (f[tag] || 0) + 1;
-  lsSet(K.tags, f);
-}
+const noteTag = tag => addFreq(tag, 1);
 async function removeTagLine(to, tag) {
   const path = join(P.dst, TAG_FILE);
   const want = baseName(to) + '\t' + tag;
@@ -454,6 +520,7 @@ async function removeTagLine(to, tag) {
   const lines = text.split('\n');
   for (let i = lines.length - 1; i >= 0; i--) if (lines[i] === want) { lines.splice(i, 1); break; }
   await AllFiles.writeText({ path, text: lines.join('\n') });
+  addFreq(tag, -1);
 }
 
 // ---- nagyítás (dupla koppintás) ----
@@ -536,10 +603,16 @@ st.addEventListener('pointerup', e => {
 
 // ---- videó ----
 let speedBtn = null;
+let pausedByPanel = false, wasPlayingBeforeHide = false;
 const SPEEDS = [1, 1.2, 1.5, 2];
 const curIsVideo = () => { const it = queue[qi]; return !!it && isVideo(it.name); };
+function resumeVideo() {
+  const v = $('vid');
+  if (curIsVideo() && v.getAttribute('src')) { const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); }
+}
 function unloadVideo() {
   const v = $('vid');
+  pausedByPanel = false;
   try { v.pause(); } catch {}
   v.removeAttribute('src'); v.load();
   v.style.display = 'none';
@@ -589,8 +662,8 @@ function updateSeek() {
 }
 document.addEventListener('visibilitychange', () => {
   const v = $('vid');
-  if (document.hidden) { try { v.pause(); } catch {} }
-  else if (topLayer() === 'work' && curIsVideo()) { const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); }
+  if (document.hidden) { wasPlayingBeforeHide = !v.paused && !!v.getAttribute('src'); try { v.pause(); } catch {} }
+  else if (wasPlayingBeforeHide && topLayer() === 'work' && curIsVideo() && !pausedByPanel) { wasPlayingBeforeHide = false; resumeVideo(); }
 });
 
 // ---- megjelenítés és lapozás ----

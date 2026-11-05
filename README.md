@@ -1,4 +1,4 @@
-# Kép-videó válogató (Android, v3.0)
+# Kép-videó válogató (Android, v3.1)
 
 Telefonon futó kép- és videóválogató: a fájlt egy gombnyomásra közvetlenül a megfelelő mappába helyezi át
 (nincs txt, nincs Windowsos szétdobás). A mappagombok a kiválasztott **célmappa almappái**.
@@ -17,9 +17,13 @@ Az Android „vissza" gombja egy szinttel visszalép (munkafelület → profilli
 2. **＋ Új profil**: képek mappája, célmappa (a mappaválasztóban új mappa is létrehozható), Mentés.
 3. **▶ Indítás**. Koppints a képre → gombok; dupla koppintás = nagyítás (videónál szünet/lejátszás); húzás = lapozás;
    jobbra-vissza húzás = fájlnév; **↩ Vissza** visszamozgatja az utolsó fájlt (újraindítás után is).
-4. Videónál alul tekerősáv, a gombpanelen sebességváltó (⏩).
-5. Címkézésnél a gombpanelen **🏷 Címke**: a beírt címke a fájl besorolásakor a célmappa `cimkek.txt` fájljába kerül
-   (soronként: fájlnév, tabulátor, címke). A **Vissza** a címkesort is törli.
+4. Videónál alul tekerősáv, a gombpanelen sebességváltó (⏩). Amíg a gombpanel nyitva van, a videó szünetel,
+   bezárásakor (újabb koppintás) folytatódik.
+   A gombpanel **⇄ Profil** gombjával közvetlenül másik profilra lehet váltani.
+5. Címkézésnél a gombpanelen **🏷 Címke**: a címke vesszővel elválasztott tételekből áll (pl. `N6, hajlékony lányok`),
+   és a fájl besorolásakor a célmappa `cimkek.txt` fájljába kerül (soronként: fájlnév, tabulátor, címke).
+   Az ajánlott tételek egyesével jelennek meg, gyakoriság szerint (görgethető); a tétel első 2 karaktere után csak az
+   ezzel kezdődők maradnak. A **Vissza** a címkesort is törli.
 
 ## Az APK készítése
 Minden feltöltésnél (push a `main` ágra) a `.github/workflows/build-apk.yml` lefut, és a **Releases** oldalra kiteszi:
