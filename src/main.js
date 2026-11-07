@@ -5,13 +5,14 @@ import { App as CapApp } from '@capacitor/app';
 // A __MOCK_ALLFILES__ csak az automatikus tesztekhez van.
 const AllFiles = window.__MOCK_ALLFILES__ || registerPlugin('AllFiles');
 
-const VERSION = 'v3.2';
+const VERSION = 'v3.3';
 const $ = id => document.getElementById(id);
 const IMG_EXT = /\.(jpe?g|jfif|pjpe?g|pjp|png|webp|gif|bmp|avif|heic|heif)$/i;
 const VID_EXT = /\.(mp4|m4v|webm|mov|3gp|mkv|ogv|avi)$/i;
 const isVideo = name => VID_EXT.test(name);
 const isMedia = name => IMG_EXT.test(name) || VID_EXT.test(name);
-const ZOOM = 2.5;
+const ZOOM_STEPS = [1.5, 2.0, 2.5];   // nagyítási lépcsők (a − / + gombok léptetnek közöttük)
+const ZOOM_DEFAULT = 2.0;             // dupla koppintásra ekkorára nagyít
 const HIST_MAX = 100;
 const TAG_FILE = 'cimkek.txt';
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -560,7 +561,19 @@ async function removeTagLine(to, tag) {
 
 // ---- nagyítás (dupla koppintás) ----
 let zoom = 1, tx = 0, ty = 0;
-function applyZoom() { $('img').style.transform = zoom === 1 ? '' : `translate(${tx}px,${ty}px) scale(${zoom})`; }
+const fmtZoom = z => z.toFixed(1).replace('.', ',') + '×';
+function updateZoomCtl() {
+  const on = zoom > 1;
+  $('zoomctl').style.display = on ? 'flex' : 'none';
+  if (on) {
+    $('zoomLvl').textContent = fmtZoom(zoom);
+    $('zoomPlus').disabled = zoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1] - 1e-6;
+  }
+}
+function applyZoom() {
+  $('img').style.transform = zoom === 1 ? '' : `translate(${tx}px,${ty}px) scale(${zoom})`;
+  updateZoomCtl();
+}
 function resetZoom() { zoom = 1; tx = ty = 0; applyZoom(); }
 function clampPan() {
   const img = $('img'), st = $('stage');
@@ -575,11 +588,26 @@ function toggleZoom(x, y) {
   closeCats();
   if (zoom > 1) { resetZoom(); return; }
   const r = $('stage').getBoundingClientRect();
-  zoom = ZOOM;
+  zoom = ZOOM_DEFAULT;
   tx = (x - r.left - r.width / 2) * (1 - zoom);
   ty = (y - r.top - r.height / 2) * (1 - zoom);
   clampPan(); applyZoom();
 }
+
+/** Egy lépcsőt lép a ZOOM_STEPS listában (dir = +1 nagyít, -1 kicsinyít). A kép a képernyő közepéhez képest marad a helyén.
+ *  Az első lépcsőn a − visszaáll 1×-re; a legnagyobbnál a + nem csinál semmit. */
+function stepZoom(dir) {
+  if (zoom <= 1) return;
+  const i = ZOOM_STEPS.findIndex(s => Math.abs(s - zoom) < 1e-6);
+  const j = i + dir;
+  if (j < 0) { resetZoom(); return; }
+  if (j >= ZOOM_STEPS.length) return;
+  const nz = ZOOM_STEPS[j], k = nz / zoom;
+  tx *= k; ty *= k; zoom = nz;
+  clampPan(); applyZoom();
+}
+$('zoomMinus').onclick = e => { e.stopPropagation(); stepZoom(-1); };
+$('zoomPlus').onclick = e => { e.stopPropagation(); stepZoom(1); };
 
 // ---- tájékoztató (kép sorszáma, fájlneve): 2 mp-ig látszik ----
 let infoTimer;
@@ -609,7 +637,7 @@ function tap(x, y) {
 }
 st.addEventListener('pointerdown', e => {
   if (e.isPrimary === false) { ptr = null; return; }
-  const onBtn = !!e.target.closest('#cats button');
+  const onBtn = !!e.target.closest('#cats button, #zoomctl');
   ptr = { x: e.clientX, y: e.clientY, sx: tx, sy: ty, moved: false, max: 0, onBtn };
   if (!onBtn) { try { st.setPointerCapture(e.pointerId); } catch {} }
 });
