@@ -80,7 +80,12 @@
              background:rgba(0,0,0,.6); border:1px solid #666; border-radius:26px; padding:5px 7px; touch-action:manipulation; }
   #zoomctl button { width:54px; height:54px; padding:0; font-size:30px; line-height:1; border-radius:50%; background:rgba(34,34,34,.93); }
   #zoomctl button:disabled { opacity:.35; }
-  #zoomLvl { min-width:52px; text-align:center; font-size:17px; font-weight:600; color:#fff; }
+  #zoomctl #zoomLvl { width:auto; min-width:68px; height:44px; padding:0 10px; border-radius:22px; font-size:18px; font-weight:600; color:#fff; }
+  #zoomEdit { display:none; align-items:center; gap:6px; }
+  #zoomctl.editing #zoomMinus, #zoomctl.editing #zoomLvl, #zoomctl.editing #zoomPlus { display:none; }
+  #zoomctl.editing #zoomEdit { display:flex; }
+  #zoomIn { width:84px; height:46px; font-size:22px; text-align:center; color:#fff; background:#111; border:1px solid #888; border-radius:10px; }
+  #zoomOk { width:auto !important; min-width:64px; height:46px !important; padding:0 14px !important; border-radius:23px !important; font-size:18px !important; font-weight:700; }
 
   /* Tájékoztató a bal felső sarokban: 2 mp után eltűnik */
   #info { position:absolute; top:max(8px, env(safe-area-inset-top)); left:8px; max-width:70vw; pointer-events:none; z-index:4;
@@ -207,7 +212,7 @@
     <video id="vid" playsinline loop></video>
     <div id="info"><div id="pos"></div><div class="fn" id="fn"></div><div class="tg" id="tg"></div></div>
     <div id="cats"></div>
-    <div id="zoomctl"><button id="zoomMinus" aria-label="Kicsinyítés">−</button><span id="zoomLvl"></span><button id="zoomPlus" aria-label="Nagyítás">+</button></div>
+    <div id="zoomctl"><button id="zoomMinus" aria-label="Kicsinyítés">−</button><button id="zoomLvl" aria-label="Nagyítás értéke (koppints az átíráshoz)"></button><button id="zoomPlus" aria-label="Nagyítás">+</button><span id="zoomEdit"><input id="zoomIn" type="text" inputmode="decimal" autocomplete="off" maxlength="4" aria-label="Nagyítás (1,0–3,0)"><button id="zoomOk">OK</button></span></div>
     <div id="seek"><div class="time" id="seekTime"></div><div class="track"><div class="fill" id="seekFill"></div><div class="knob" id="seekKnob"></div></div></div>
   </div>
   <div id="tagbar">

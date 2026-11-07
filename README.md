@@ -1,4 +1,4 @@
-# Kép-videó válogató (Android, v3.3)
+# Kép-videó válogató (Android, v3.4)
 
 Telefonon futó kép- és videóválogató: a fájlt egy gombnyomásra közvetlenül a megfelelő mappába helyezi át
 (nincs txt, nincs Windowsos szétdobás). A mappagombok a kiválasztott **célmappa almappái**.
@@ -18,7 +18,7 @@ A mappagombok méretét a főmenüben két számmal lehet megadni: Enter vagy ki
 ## Használat
 1. Első indításkor: **Engedély megadása** → kapcsold be a „Minden fájl kezelése" engedélyt.
 2. **＋ Új profil**: képek mappája, célmappa (a mappaválasztóban új mappa is létrehozható), Mentés.
-3. **▶ Indítás**. Koppints a képre → gombok; dupla koppintás = nagyítás 2,0×-re (videónál szünet/lejátszás), nagyítva a bal alsó sarokban megjelenő **−** / **+** gombbal 1,5× · 2,0× · 2,5× közt léptethető (1,5×-nél a − visszaáll 1×-re); húzás = lapozás;
+3. **▶ Indítás**. Koppints a képre → gombok; dupla koppintás = nagyítás (alapból 1,5×; videónál szünet/lejátszás), nagyítva a bal alsó sarokban megjelenő **−** / **+** gombbal 0,1-esével léptethető 1,0–3,0× között (1,1×-nél a − visszaáll 1×-re); a szám megérintésével **beírhatod az értéket** (pl. 1,7) és OK-t nyomsz. Az utoljára beállított érték eszközönként megjegyződik, a dupla koppintás ennyire nagyít; húzás = lapozás;
    jobbra-vissza húzás = fájlnév; **↩ Vissza** visszamozgatja az utolsó fájlt (újraindítás után is).
 4. Videónál alul tekerősáv, a gombpanelen sebességváltó (⏩). Amíg a gombpanel nyitva van, a videó szünetel,
    bezárásakor (újabb koppintás) folytatódik.

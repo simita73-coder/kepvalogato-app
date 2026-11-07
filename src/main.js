@@ -5,14 +5,14 @@ import { App as CapApp } from '@capacitor/app';
 // A __MOCK_ALLFILES__ csak az automatikus tesztekhez van.
 const AllFiles = window.__MOCK_ALLFILES__ || registerPlugin('AllFiles');
 
-const VERSION = 'v3.3';
+const VERSION = 'v3.4';
 const $ = id => document.getElementById(id);
 const IMG_EXT = /\.(jpe?g|jfif|pjpe?g|pjp|png|webp|gif|bmp|avif|heic|heif)$/i;
 const VID_EXT = /\.(mp4|m4v|webm|mov|3gp|mkv|ogv|avi)$/i;
 const isVideo = name => VID_EXT.test(name);
 const isMedia = name => IMG_EXT.test(name) || VID_EXT.test(name);
-const ZOOM_STEPS = [1.5, 2.0, 2.5];   // nagyítási lépcsők (a − / + gombok léptetnek közöttük)
-const ZOOM_DEFAULT = 2.0;             // dupla koppintásra ekkorára nagyít
+const ZOOM_MIN = 1.0, ZOOM_MAX = 3.0;  // nagyítás tartománya (0,1-es lépésekkel; 1,0× = nincs nagyítás)
+const ZOOM_FALLBACK = 1.5;             // dupla koppintásra ekkorára nagyít, amíg nincs eszközönként elmentett érték
 const HIST_MAX = 100;
 const TAG_FILE = 'cimkek.txt';
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -562,13 +562,17 @@ async function removeTagLine(to, tag) {
 // ---- nagyítás (dupla koppintás) ----
 let zoom = 1, tx = 0, ty = 0;
 const fmtZoom = z => z.toFixed(1).replace('.', ',') + '×';
+const roundZoom = z => Math.round(z * 10) / 10;
+const clampZoom = z => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, roundZoom(z)));
+// Dupla koppintás nagyítása: az utoljára beállított érték, eszközönként (telefon / tablet külön) megjegyezve
+let zoomPref = (() => { const v = Number(lsGet('kv_zoom', ZOOM_FALLBACK)); return v > 1 ? clampZoom(v) : ZOOM_FALLBACK; })();
 function updateZoomCtl() {
   const on = zoom > 1;
   $('zoomctl').style.display = on ? 'flex' : 'none';
   if (on) {
     $('zoomLvl').textContent = fmtZoom(zoom);
-    $('zoomPlus').disabled = zoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1] - 1e-6;
-  }
+    $('zoomPlus').disabled = zoom >= ZOOM_MAX - 1e-6;
+  } else closeZoomEdit();
 }
 function applyZoom() {
   $('img').style.transform = zoom === 1 ? '' : `translate(${tx}px,${ty}px) scale(${zoom})`;
@@ -588,26 +592,53 @@ function toggleZoom(x, y) {
   closeCats();
   if (zoom > 1) { resetZoom(); return; }
   const r = $('stage').getBoundingClientRect();
-  zoom = ZOOM_DEFAULT;
+  zoom = zoomPref;
   tx = (x - r.left - r.width / 2) * (1 - zoom);
   ty = (y - r.top - r.height / 2) * (1 - zoom);
   clampPan(); applyZoom();
 }
 
-/** Egy lépcsőt lép a ZOOM_STEPS listában (dir = +1 nagyít, -1 kicsinyít). A kép a képernyő közepéhez képest marad a helyén.
- *  Az első lépcsőn a − visszaáll 1×-re; a legnagyobbnál a + nem csinál semmit. */
+/** Beállítja a nagyítást (1,0–3,0, 0,1-es lépés). A kép a képernyő közepéhez képest marad a helyén.
+ *  1,0 = nincs nagyítás. Az érték eszközönként megjegyződik: ennyire nagyít majd a dupla koppintás. */
+function setZoomTo(v) {
+  const nz = clampZoom(v);
+  if (nz <= 1) { resetZoom(); return; }
+  const k = nz / zoom;
+  tx *= k; ty *= k; zoom = nz;
+  zoomPref = nz; lsSet('kv_zoom', nz);
+  clampPan(); applyZoom();
+}
+/** − / + gomb: 0,1-et lép (1,1×-nél a − visszaáll 1×-re; 3,0×-nél a + nem csinál semmit). */
 function stepZoom(dir) {
   if (zoom <= 1) return;
-  const i = ZOOM_STEPS.findIndex(s => Math.abs(s - zoom) < 1e-6);
-  const j = i + dir;
-  if (j < 0) { resetZoom(); return; }
-  if (j >= ZOOM_STEPS.length) return;
-  const nz = ZOOM_STEPS[j], k = nz / zoom;
-  tx *= k; ty *= k; zoom = nz;
-  clampPan(); applyZoom();
+  setZoomTo(roundZoom(zoom + dir * 0.1));
 }
 $('zoomMinus').onclick = e => { e.stopPropagation(); stepZoom(-1); };
 $('zoomPlus').onclick = e => { e.stopPropagation(); stepZoom(1); };
+
+// Átírható érték: a szám megérintésével beviteli mező + OK gomb nyílik (pl. 1,7)
+function openZoomEdit() {
+  $('zoomctl').classList.add('editing');
+  const i = $('zoomIn'); i.value = zoom.toFixed(1).replace('.', ',');
+  i.focus(); i.select();
+}
+function closeZoomEdit() {
+  $('zoomctl').classList.remove('editing');
+  $('zoomIn').blur();
+}
+function applyZoomEdit() {
+  const v = parseFloat($('zoomIn').value.replace(',', '.'));
+  closeZoomEdit();
+  if (!isFinite(v)) return;
+  if (v < ZOOM_MIN - 1e-6 || v > ZOOM_MAX + 1e-6) toast(`Csak ${fmtZoom(ZOOM_MIN)} – ${fmtZoom(ZOOM_MAX)} között`, 1800);
+  setZoomTo(v);
+}
+$('zoomLvl').onclick = e => { e.stopPropagation(); openZoomEdit(); };
+$('zoomOk').onclick = e => { e.stopPropagation(); applyZoomEdit(); };
+$('zoomIn').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); applyZoomEdit(); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeZoomEdit(); }
+});
 
 // ---- tájékoztató (kép sorszáma, fájlneve): 2 mp-ig látszik ----
 let infoTimer;
